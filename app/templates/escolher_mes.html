@@ -11,6 +11,18 @@
             <h1>Olá, {{ supervisor }}</h1>
             <a href="/logout">Sair</a>
         </div>
+
+        <nav class="abas">
+            {% if destino == '/coordenador' %}
+            <a href="/coordenador" class="aba-ativa">Visão geral</a>
+            <a href="/coordenador/vinculos-tecnicos">Vínculos de técnicos</a>
+            <a href="/coordenador/ranking">Ranking</a>
+            {% else %}
+            <a href="/">Técnicos da equipe</a>
+            <a href="/avaliacoes" class="aba-ativa">Avaliação dos técnicos</a>
+            {% endif %}
+        </nav>
+
         <p class="subtitulo">Escolha o mês e ano que deseja avaliar ou consultar · <a href="/minhas-avaliacoes">Ver minhas avaliações anteriores</a></p>
 
         <div class="cartao-selecionar-mes">

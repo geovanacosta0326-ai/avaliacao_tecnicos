@@ -68,3 +68,6 @@ sql/schema.sql         -> tabelas novas: usuarios_supervisores, avaliacoes_tecni
 - Tela de administração para cadastrar supervisores em lote
 - Integração da nota da avaliação no ranking geral
 - Histórico/gráfico de evolução do técnico mês a mês
+
+
+https://avaliacao-tecnicos.onrender.com/login
