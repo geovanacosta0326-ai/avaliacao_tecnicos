@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Geral — Coordenador</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Dashboard Geral — Coordenador</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        <p class="subtitulo">
+            Visão consolidada de toda a base · período: <strong>{{ periodo_label }}</strong>
+            · <a href="/coordenador">Ver supervisores por mês</a>
+            · <a href="/coordenador/ranking">Ranking do mês</a>
+            · <a href="/minhas-avaliacoes">Histórico geral</a>
+        </p>
+
+        <form method="get" class="dash-filtro" action="/coordenador/dashboard">
+            <label for="mes">Período:</label>
+            <select id="mes" name="mes" onchange="this.form.submit()">
+                <option value="todos" {% if mes_selecionado == 'todos' %}selected{% endif %}>Todos os meses</option>
+                {% for m in meses_disponiveis %}
+                <option value="{{ m.valor }}" {% if mes_selecionado == m.valor %}selected{% endif %}>{{ m.label }}</option>
+                {% endfor %}
+            </select>
+            <noscript><button type="submit" style="margin:0;">Filtrar</button></noscript>
+        </form>
+
+        <!-- KPIs -->
+        <div class="kpi-grade">
+            <div class="kpi">
+                <div class="kpi-rotulo">Média geral</div>
+                <div class="kpi-valor">{{ indicadores.media_geral if indicadores.media_geral is not none else "—" }}</div>
+                <div class="kpi-nota">todas as avaliações</div>
+            </div>
+            <div class="kpi dourado">
+                <div class="kpi-rotulo">Avaliações lançadas</div>
+                <div class="kpi-valor">{{ indicadores.total_avaliacoes }}</div>
+                <div class="kpi-nota">no total</div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-rotulo">Técnicos avaliados</div>
+                <div class="kpi-valor">{{ indicadores.total_tecnicos }}</div>
+                <div class="kpi-nota">técnicos distintos</div>
+            </div>
+            <div class="kpi dourado">
+                <div class="kpi-rotulo">Supervisores ativos</div>
+                <div class="kpi-valor">{{ indicadores.total_supervisores }}</div>
+                <div class="kpi-nota">já lançaram avaliação</div>
+            </div>
+        </div>
+
+        <!-- Evolução -->
+        <h2>Evolução das avaliações</h2>
+        {% if tem_evolucao %}
+        <div class="cartao-grafico">
+            <canvas id="graficoEvolucao" height="80"></canvas>
+        </div>
+        {% else %}
+        <div class="aviso">Ainda não há avaliações em pelo menos dois meses — o gráfico de evolução aparece assim que houver histórico suficiente.</div>
+        {% endif %}
+
+        <!-- Ranking de supervisores -->
+        <h2>Ranking de supervisores</h2>
+        <ul class="lista-destaque">
+            {% for s in supervisores %}
+            <li>
+                <span class="nome">
+                    <span class="pos">{% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}º{% endif %}</span>
+                    {{ s.supervisor }}
+                    <span class="sub">· {{ s.tecnicos }} técnico(s) · {{ s.qtd }} avaliação(ões)</span>
+                </span>
+                <span class="nota">{{ s.media }}</span>
+            </li>
+            {% else %}
+            <p class="dash-vazio">Nenhum supervisor lançou avaliação ainda.</p>
+            {% endfor %}
+        </ul>
+
+        <!-- Destaques de técnicos -->
+        <div class="dash-colunas">
+            <div>
+                <h2>🏆 Técnicos mais bem avaliados</h2>
+                <ul class="lista-destaque">
+                    {% for t in top_tecnicos %}
+                    <li>
+                        <span class="nome">
+                            <span class="pos">{{ loop.index }}º</span>{{ t.tecnico }}
+                            <span class="sub">· {{ t.supervisor }}</span>
+                        </span>
+                        <span class="nota">{{ t.media }}</span>
+                    </li>
+                    {% else %}
+                    <p class="dash-vazio">Nenhuma avaliação registrada ainda.</p>
+                    {% endfor %}
+                </ul>
+            </div>
+            <div>
+                <h2>⚠️ Precisam de atenção</h2>
+                <ul class="lista-destaque baixa">
+                    {% for t in atencao %}
+                    <li>
+                        <span class="nome">
+                            {{ t.tecnico }}
+                            <span class="sub">· {{ t.supervisor }}</span>
+                        </span>
+                        <span class="nota">{{ t.media }}</span>
+                    </li>
+                    {% else %}
+                    <p class="dash-vazio">Nenhuma avaliação registrada ainda.</p>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    {% if tem_evolucao %}
+    <script>
+        const labels = {{ labels_grafico|safe }};
+        const medias = {{ medias_grafico|safe }};
+        const qtd = {{ qtd_grafico|safe }};
+
+        new Chart(document.getElementById('graficoEvolucao'), {
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        type: 'line',
+                        label: 'Média geral',
+                        data: medias,
+                        yAxisID: 'y',
+                        borderColor: '#2d6a4f',
+                        backgroundColor: 'rgba(74, 155, 116, 0.15)',
+                        pointBackgroundColor: '#d19a42',
+                        pointBorderColor: '#b9822f',
+                        pointRadius: 5, pointHoverRadius: 7,
+                        borderWidth: 3, tension: 0.25, fill: true, spanGaps: true,
+                    },
+                    {
+                        type: 'bar',
+                        label: 'Avaliações no mês',
+                        data: qtd,
+                        yAxisID: 'y1',
+                        backgroundColor: 'rgba(209, 154, 66, 0.35)',
+                        borderColor: '#d19a42',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'bottom' } },
+                scales: {
+                    y: {
+                        position: 'left', min: 5, max: 10,
+                        ticks: { stepSize: 1 }, grid: { color: '#e2e6dc' },
+                        title: { display: true, text: 'Média' }
+                    },
+                    y1: {
+                        position: 'right', beginAtZero: true,
+                        grid: { display: false },
+                        ticks: { precision: 0 },
+                        title: { display: true, text: 'Qtd.' }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

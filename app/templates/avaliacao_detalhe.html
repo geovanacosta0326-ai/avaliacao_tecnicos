@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Avaliação de {{ avaliacao.tecnico }}</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <style>
+        .so-imprimir { display: none; }
+        /* Só aparece quando a pessoa manda imprimir / salvar em PDF */
+        @media print {
+            .nao-imprimir { display: none !important; }
+            .so-imprimir { display: block; }
+            body { background: #fff; }
+            .container { box-shadow: none; max-width: 100%; }
+            .lista-perguntas li { break-inside: avoid; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar nao-imprimir">
+            <h1>{{ avaliacao.tecnico }}</h1>
+            <span style="display:flex; gap:16px; align-items:center;">
+                <a href="#" onclick="window.print(); return false;">🖨️ Salvar em PDF / Imprimir</a>
+                <a href="#" onclick="history.back(); return false;">← Voltar</a>
+            </span>
+        </div>
+        <h1 class="so-imprimir">{{ avaliacao.tecnico }}</h1>
+        <p class="subtitulo">
+            Referência: {{ mes_referencia }} ·
+            Enviada em {{ avaliacao.data_avaliacao.strftime("%d/%m/%Y às %H:%M") }} ·
+            Nota final:
+            <strong style="color:#1e3a5f;">{{ avaliacao.nota_final }}</strong>
+        </p>
+
+        {% for bloco in blocos %}
+        <h2>{{ bloco.titulo }}</h2>
+        <ul class="lista-perguntas">
+            {% for item in bloco.itens %}
+            <li>
+                <span class="lista-perguntas-pergunta">{{ item.pergunta }}</span>
+                <span class="lista-perguntas-resposta">{{ item.resposta if item.resposta not in (None, "") else "—" }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endfor %}
+    </div>
+</body>
+</html>

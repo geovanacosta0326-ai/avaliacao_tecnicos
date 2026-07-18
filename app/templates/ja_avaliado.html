@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Já avaliado</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container" style="max-width: 420px; margin-top: 100px; text-align:center;">
+        <h1>Avaliação já registrada</h1>
+        <p class="subtitulo">{{ tecnico }} já foi avaliado referente a {{ mes_referencia }}.</p>
+
+        <form method="get" action="/avaliar/{{ tecnico }}" style="text-align:left;">
+            <label for="mes">Escolher outro mês para avaliar</label>
+            <select id="mes" name="mes" onchange="this.form.submit()">
+                {% for m in meses_disponiveis %}
+                <option value="{{ m.valor }}" {% if m.valor == mes_referencia_valor %}selected{% endif %}>{{ m.label }}</option>
+                {% endfor %}
+            </select>
+        </form>
+
+        <a class="botao" href="/avaliacoes?mes={{ mes_referencia_valor }}">Voltar ao painel</a>
+    </div>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Escolha o mês — Avaliação de Técnicos</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Olá, {{ supervisor }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        <p class="subtitulo">Escolha o mês e ano que deseja avaliar ou consultar · <a href="/minhas-avaliacoes">Ver minhas avaliações anteriores</a></p>
+
+        <div class="cartao-selecionar-mes">
+            <form method="get" action="{{ destino | default('/avaliacoes') }}">
+                <label for="mes" class="cartao-selecionar-mes-label">📅 Mês de referência</label>
+                <input
+                    type="month"
+                    id="mes"
+                    name="mes"
+                    value="{{ meses_disponiveis[0].valor }}"
+                    min="{{ meses_disponiveis[-1].valor }}"
+                    max="{{ meses_disponiveis[0].valor }}"
+                    required
+                >
+                <button type="submit">Continuar</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

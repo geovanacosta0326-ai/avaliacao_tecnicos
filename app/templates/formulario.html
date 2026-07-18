@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Avaliar {{ tecnico }}</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+<div class="container">
+
+    {% macro nota(campo, texto) %}
+    <label>{{ texto }}</label>
+    <div class="escala-nota">
+        {% for n in range(5, 11) %}
+        <label><input type="radio" name="{{ campo }}" value="{{ n }}" required> {{ n }}</label>
+        {% endfor %}
+    </div>
+    {% endmacro %}
+
+    <div class="top-bar">
+        <h1>Avaliando: {{ tecnico }}</h1>
+        <a href="/avaliacoes?mes={{ mes_referencia_valor }}">← Voltar</a>
+    </div>
+    <p class="subtitulo">Supervisor: {{ supervisor }}</p>
+
+    <form method="get" action="/avaliar/{{ tecnico }}" style="margin-bottom: 18px;">
+        <label for="mes">Mês de referência da avaliação</label>
+        <select id="mes" name="mes" onchange="this.form.submit()">
+            {% for m in meses_disponiveis %}
+            <option value="{{ m.valor }}" {% if m.valor == mes_referencia_valor %}selected{% endif %}>{{ m.label }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    <p class="subtitulo">Escala: 5 Muito Ruim · 6 Ruim · 7 Regular · 8 Bom · 9 Muito Bom · 10 Excelente</p>
+
+    <form method="post" action="/avaliar/{{ tecnico }}">
+        <input type="hidden" name="mes_referencia" value="{{ mes_referencia_valor }}">
+
+        {{ nota("p1_dominio_metodologia", "1. Como você avalia o domínio do técnico sobre a metodologia ATeG durante a execução das visitas?") }}
+        {{ nota("p2_qualidade_orientacoes", "2. Como você avalia a qualidade das orientações técnicas/gerenciais repassadas aos produtores?") }}
+        {{ nota("p3_planejamento", "3. Como você avalia a elaboração e execução do planejamento (metas, matriz SWOT e plano de ação)?") }}
+        {{ nota("p4_registros_sisateg", "4. Como você avalia a qualidade dos registros realizados no SISATEG (check-in, check-out, fotos, localização e preenchimento dos dados produtivos, receitas e despesas e inventário de recursos)?") }}
+        {{ nota("p5_relatorios_mensais", "5. Como você avalia a qualidade técnica e a consistência dos relatórios mensais elaborados pelo técnico?") }}
+        {{ nota("p6_cumprimento_prazos", "6. Como você avalia o cumprimento dos prazos para envio de relatórios e demais atividades?") }}
+        {{ nota("p7_acompanhamento_evolucao", "7. Como você avalia a capacidade do técnico em acompanhar a evolução das propriedades e verificar o cumprimento das recomendações anteriores?") }}
+        {{ nota("p8_comunicacao_produtores", "8. Como você avalia a comunicação e o relacionamento do técnico com os produtores rurais?") }}
+        {{ nota("p9_comprometimento_normas", "9. Como você avalia o comprometimento do técnico com as orientações da supervisão e as normas do programa ATeG?") }}
+        {{ nota("p10_desempenho_geral", "10. Considerando o desempenho geral, como você avalia a atuação do técnico no programa ATeG?") }}
+
+        <button type="submit">Enviar avaliação</button>
+    </form>
+</div>
+</body>
+</html>

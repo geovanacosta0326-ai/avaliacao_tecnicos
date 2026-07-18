@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Evolução — {{ tecnico }}</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+    <div class="container" style="max-width: 880px;">
+        <div class="top-bar">
+            <h1>{{ tecnico }}</h1>
+            <a href="#" onclick="history.back(); return false;">← Voltar</a>
+        </div>
+        <p class="subtitulo">Evolução das notas mês a mês. <a href="/minhas-avaliacoes">Ver histórico completo</a></p>
+
+        {% if not meses %}
+            <p>Ainda não há avaliações deste técnico para mostrar evolução.</p>
+        {% elif meses|length == 1 %}
+            <div class="aviso">Este técnico só tem uma avaliação registrada ({{ meses[0] }}) — assim que houver uma segunda, o gráfico de evolução aparece aqui.</div>
+        {% endif %}
+
+        {% if meses|length >= 2 %}
+        <div class="cartao-grafico">
+            <div class="cartao-grafico-topo">
+                <h2 style="margin:0; border:none; padding:0;">Crescimento do técnico</h2>
+                {% if crescimento is not none %}
+                    <span class="crescimento-badge {{ 'up' if crescimento > 0 else ('down' if crescimento < 0 else '') }}">
+                        {{ "▲" if crescimento > 0 else ("▼" if crescimento < 0 else "＝") }}
+                        {{ crescimento if crescimento >= 0 else -crescimento }} desde {{ meses[0] }}
+                    </span>
+                {% endif %}
+            </div>
+            <canvas id="graficoEvolucao" height="90"></canvas>
+        </div>
+        {% endif %}
+
+        {% if meses %}
+        <div class="tabela-comparativa-wrap">
+        <table class="tabela-comparativa">
+            <thead>
+                <tr>
+                    <th class="col-pergunta">Item</th>
+                    {% for m in meses %}<th>{{ m }}</th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in itens %}
+                <tr>
+                    <td class="col-pergunta">{{ item.rotulo }}</td>
+                    {% for v in item.valores %}
+                    <td class="col-nota">
+                        {{ v.valor if v.valor not in (None, "") else "—" }}
+                        {% if v.delta is not none and v.delta != 0 %}
+                            <span class="delta {{ 'up' if v.delta > 0 else 'down' }}">{{ "▲" if v.delta > 0 else "▼" }}{{ v.delta|abs }}</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                <tr class="linha-media">
+                    <td class="col-pergunta">Média final</td>
+                    {% for v in media_valores %}<td><strong>{{ v }}</strong></td>{% endfor %}
+                </tr>
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if meses|length >= 2 %}
+    <script>
+        const labels = {{ labels_grafico|safe }};
+        const valores = {{ valores_grafico|safe }};
+
+        new Chart(document.getElementById('graficoEvolucao'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Média final',
+                    data: valores,
+                    borderColor: '#2d6a4f',
+                    backgroundColor: 'rgba(74, 155, 116, 0.15)',
+                    pointBackgroundColor: '#d19a42',
+                    pointBorderColor: '#b9822f',
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    borderWidth: 3,
+                    tension: 0.25,
+                    fill: true,
+                    spanGaps: true,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => 'Média: ' + ctx.parsed.y
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 5, max: 10,
+                        ticks: { stepSize: 1 },
+                        grid: { color: '#e2e6dc' }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

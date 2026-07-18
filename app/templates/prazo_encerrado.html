@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Prazo encerrado</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container" style="max-width: 460px; margin-top: 100px; text-align:center;">
+        <h1>⏳ Prazo encerrado</h1>
+        <p class="subtitulo">
+            O prazo para avaliar <strong>{{ tecnico }}</strong> referente a
+            <strong>{{ mes_referencia }}</strong> encerrou em <strong>{{ data_limite }}</strong>.
+        </p>
+
+        {% if solicitacao_pendente %}
+        <p class="subtitulo">
+            Você já solicitou prazo para {{ mes_referencia }}. Aguarde o coordenador
+            definir uma nova data — assim que ele autorizar, essa avaliação fica liberada.
+        </p>
+        {% else %}
+        <p class="subtitulo">
+            Para lançar essa avaliação agora, solicite ao coordenador que reabra
+            o prazo de {{ mes_referencia }}.
+        </p>
+        <form method="post" action="/solicitar-prazo/{{ tecnico }}" style="margin-top:20px;">
+            <input type="hidden" name="mes" value="{{ mes_referencia_valor }}">
+            <button type="submit">Solicitar prazo ao coordenador</button>
+        </form>
+        {% endif %}
+
+        <a class="botao" href="/avaliacoes?mes={{ mes_referencia_valor }}" style="margin-top:16px; display:inline-block;">Voltar ao painel</a>
+    </div>
+</body>
+</html>

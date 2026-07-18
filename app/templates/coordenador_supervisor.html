@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ supervisor }} — {{ mes_referencia }}</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>{{ supervisor }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        <p class="subtitulo">
+            Avaliações referentes a <strong>{{ mes_referencia }}</strong>
+            · <a href="/coordenador?mes={{ mes_valor }}">← Voltar aos supervisores</a>
+            · <a href="/coordenador">Trocar mês</a>
+            · <a href="/coordenador/exportar?mes={{ mes_valor }}&supervisor={{ supervisor }}">📥 Baixar planilha (Excel)</a>
+            · <a href="/coordenador/exportar-completo?mes={{ mes_valor }}&supervisor={{ supervisor }}">📥 Baixar completo (com respostas)</a>
+        </p>
+        <p class="subtitulo" style="margin-top:-14px;">Técnicos ordenados do melhor para o pior desempenho no mês.</p>
+
+        {% if prazo_encerrado %}
+        <div class="caixa-alerta" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+            <div>
+                <div class="caixa-alerta-titulo">⏳ Prazo encerrado em {{ data_limite }}</div>
+                {% if autorizado %}
+                <p style="margin:4px 0 0;">Este supervisor já está autorizado a lançar avaliações de {{ mes_referencia }} fora do prazo.</p>
+                {% else %}
+                <p style="margin:4px 0 0;">Os técnicos ainda pendentes só podem ser avaliados se você autorizar.</p>
+                {% endif %}
+            </div>
+            {% if not autorizado %}
+            <form method="post" action="/coordenador/{{ supervisor }}/autorizar">
+                <input type="hidden" name="mes" value="{{ mes_valor }}">
+                <button type="submit" class="botao">Autorizar {{ supervisor }} para {{ mes_referencia }}</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <ul class="lista-tecnicos">
+            {% for t in tecnicos %}
+            <li{% if t.melhor %} style="border: 2px solid #d4af37; background:#fffdf5;"{% endif %}>
+                <span>
+                    {% if t.posicao == 1 %}🥇{% elif t.posicao == 2 %}🥈{% elif t.posicao == 3 %}🥉{% elif t.posicao %}{{ t.posicao }}º{% endif %}
+                    &nbsp;{{ t.tecnico }}
+                </span>
+                <span style="display:flex; align-items:center; gap:10px;">
+                    <a href="/comparar/{{ t.tecnico }}?sup={{ supervisor }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">📈 Evolução</a>
+                    {% if t.avaliado %}
+                        <a class="status avaliado" style="text-decoration:none;" href="/minhas-avaliacoes/{{ t.avaliacao_id }}">
+                            ✔ Avaliado{% if t.nota_final is not none %} ({{ t.nota_final }}){% endif %}
+                        </a>
+                    {% else %}
+                        <span class="status pendente">Pendente</span>
+                    {% endif %}
+                </span>
+            </li>
+            {% else %}
+            <p>Nenhum técnico vinculado a este supervisor foi encontrado na base.</p>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

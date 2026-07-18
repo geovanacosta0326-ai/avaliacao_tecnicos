@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Meus Técnicos</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Olá, {{ supervisor }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/">Avaliação dos técnicos</a>
+            <a href="/meus-tecnicos" class="aba-ativa">Técnicos da equipe</a>
+        </nav>
+
+        <h2>Equipe atual ({{ vinculados|length }})</h2>
+        {% if not vinculados %}
+        <p class="subtitulo">Você ainda não vinculou nenhum técnico à sua equipe.</p>
+        {% else %}
+        <ul class="lista-tecnicos">
+            {% for t in vinculados %}
+            <li>
+                <span>
+                    {{ t.tecnico }}
+                    <br>
+                    <small style="color: var(--texto-600); font-weight: 400;">
+                        1ª visita: {{ t.primeira_visita.strftime("%d/%m/%Y") if t.primeira_visita else "—" }}
+                        · última visita: {{ t.ultima_visita.strftime("%d/%m/%Y") if t.ultima_visita else "—" }}
+                        · na equipe desde {{ t.mes_inicio.strftime("%m/%Y") }}
+                        <br>
+                        Empresa: {{ t.empresa or "— não cadastrado —" }}
+                        · CPF: {{ t.cpf or "—" }}
+                    </small>
+                </span>
+                <span>
+                    <button type="button" class="botao"
+                        onclick="abrirDesativar('{{ t.vinculo_id }}', '{{ t.tecnico }}')"
+                        style="font-size: 0.8rem; padding: 6px 12px;">Desativar</button>
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if historico_encerrados %}
+        <h2 style="margin-top: 28px;">Histórico de desvínculos ({{ historico_encerrados|length }})</h2>
+        <ul class="historico-vinculo">
+            {% for t in historico_encerrados %}
+            <li class="encerrado">
+                <strong>{{ t.tecnico }}</strong>
+                — na equipe de {{ t.mes_inicio.strftime("%m/%Y") }} até {{ t.mes_fim.strftime("%m/%Y") }}
+                <br>
+                <small style="color: var(--texto-600); font-weight: 400;">
+                    Empresa: {{ t.empresa or "— não cadastrado —" }} · CPF: {{ t.cpf or "—" }}
+                </small>
+                <br>
+                Data do desvínculo: {{ t.mes_fim.strftime("%d/%m/%Y") }}
+                <span class="motivo">Motivo: {{ t.motivo_desvinculo }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        <h2 style="margin-top: 28px;">Técnicos disponíveis para vincular</h2>
+        <ul class="lista-tecnicos">
+            {% for t in disponiveis %}
+            <li>
+                <span>
+                    {{ t.tecnico }}
+                    <br>
+                    <small style="color: var(--texto-600); font-weight: 400;">
+                        1ª visita: {{ t.primeira_visita.strftime("%d/%m/%Y") if t.primeira_visita else "—" }}
+                        · última visita: {{ t.ultima_visita.strftime("%d/%m/%Y") if t.ultima_visita else "—" }}
+                        {% if t.supervisor_atual_de_outro %}
+                        · <span style="color: var(--terracota-600);">hoje na equipe de {{ t.supervisor_atual_de_outro }}</span>
+                        {% endif %}
+                        <br>
+                        Empresa: {{ t.empresa or "— não cadastrado —" }}
+                        · CPF: {{ t.cpf or "—" }}
+                    </small>
+                </span>
+                <span>
+                    <button type="button" class="botao botao-dourado"
+                        onclick="abrirVincular('{{ t.tecnico }}')"
+                        style="font-size: 0.8rem; padding: 6px 12px;">Vincular</button>
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <!-- Modal: vincular técnico -->
+    <dialog id="modal-vincular" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" action="/meus-tecnicos/vincular" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Vincular técnico</h2>
+            <input type="hidden" name="tecnico" id="campo-tecnico">
+            <p class="subtitulo" style="margin-bottom: 14px;">Técnico: <strong id="nome-tecnico-vincular"></strong></p>
+
+            <label>Mês de início na equipe</label>
+            <input type="month" id="mes-inicio-texto" required>
+            <input type="hidden" name="mes_inicio" id="mes-inicio-real">
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao botao-dourado">Vincular</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-vincular').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Modal: desvincular técnico -->
+    <dialog id="modal-desativar" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" action="/meus-tecnicos/desvincular" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Desvincular técnico</h2>
+            <input type="hidden" name="vinculo_id" id="campo-vinculo-id">
+            <p class="subtitulo" style="margin-bottom: 14px;">Técnico: <strong id="nome-tecnico-desativar"></strong></p>
+
+            <label>A partir do mês</label>
+            <input type="month" id="mes-fim-texto" required>
+            <input type="hidden" name="mes_fim" id="mes-fim-real">
+
+            <label>Motivo do desvínculo</label>
+            <textarea name="motivo_desvinculo" required rows="3" placeholder="Ex: técnico mudou de equipe, desligamento..."></textarea>
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao">Confirmar desvínculo</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-desativar').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script>
+        function abrirVincular(tecnico) {
+            document.getElementById('campo-tecnico').value = tecnico;
+            document.getElementById('nome-tecnico-vincular').textContent = tecnico;
+            document.getElementById('modal-vincular').showModal();
+        }
+        function abrirDesativar(vinculoId, tecnico) {
+            document.getElementById('campo-vinculo-id').value = vinculoId;
+            document.getElementById('nome-tecnico-desativar').textContent = tecnico;
+            document.getElementById('modal-desativar').showModal();
+        }
+        // <input type="month"> devolve "AAAA-MM" — completa com "-01" pro backend (DATE)
+        document.getElementById('mes-inicio-texto').addEventListener('input', function () {
+            document.getElementById('mes-inicio-real').value = this.value ? this.value + '-01' : '';
+        });
+        document.getElementById('mes-fim-texto').addEventListener('input', function () {
+            document.getElementById('mes-fim-real').value = this.value ? this.value + '-01' : '';
+        });
+    </script>
+</body>
+</html>

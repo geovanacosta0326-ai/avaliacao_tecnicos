@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Trocar senha</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container" style="max-width: 380px; margin-top: 100px;">
+        <h1>Defina sua senha</h1>
+        <p class="subtitulo">Por segurança, troque a senha provisória no primeiro acesso.</p>
+
+        {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+
+        <form method="post" action="/trocar-senha">
+            <label for="nova_senha">Nova senha</label>
+            <input type="password" name="nova_senha" id="nova_senha" required minlength="6">
+
+            <label for="confirmar_senha">Confirmar nova senha</label>
+            <input type="password" name="confirmar_senha" id="confirmar_senha" required minlength="6">
+
+            <button type="submit">Salvar senha</button>
+        </form>
+    </div>
+</body>
+</html>

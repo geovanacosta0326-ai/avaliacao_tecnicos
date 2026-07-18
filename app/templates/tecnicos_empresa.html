@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Técnicos — Vínculo com Empresa</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Técnicos — vínculo com empresa</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/coordenador">Visão geral</a>
+            <a href="/coordenador/tecnicos-empresa" class="aba-ativa">Empresa / contrato</a>
+            <a href="/coordenador/vinculos-supervisor-tecnico">Vínculos supervisor-técnico</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+
+        <p class="subtitulo">
+            Lista vem da base de visitas — todo técnico com pelo menos uma visita registrada aparece aqui.
+        </p>
+
+        <div class="tabela-comparativa-wrap">
+            <table class="tabela-comparativa" style="min-width: 760px;">
+                <thead>
+                    <tr>
+                        <th class="col-pergunta">Técnico</th>
+                        <th>1ª visita</th>
+                        <th>Última visita</th>
+                        <th>Empresa</th>
+                        <th>CNPJ</th>
+                        <th>CPF do técnico</th>
+                        <th>Início contrato</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in tecnicos %}
+                    <tr>
+                        <td class="col-pergunta">{{ t.tecnico }}</td>
+                        <td>{{ t.primeira_visita.strftime("%d/%m/%Y") if t.primeira_visita else "—" }}</td>
+                        <td>{{ t.ultima_visita.strftime("%d/%m/%Y") if t.ultima_visita else "—" }}</td>
+                        <td>{{ t.empresa or "— não cadastrado —" }}</td>
+                        <td>{{ t.cnpj_empresa or "—" }}</td>
+                        <td>{{ t.cpf or "—" }}</td>
+                        <td>{{ t.data_inicio.strftime("%d/%m/%Y") if t.data_inicio else "—" }}</td>
+                        <td>
+                            {% if t.ativo %}
+                                <span class="status avaliado">Ativo</span>
+                            {% elif t.vinculo_id %}
+                                <span class="status pendente">Inativo</span>
+                            {% else %}
+                                <span class="status pendente">Pendente</span>
+                            {% endif %}
+                        </td>
+                        <td style="white-space: nowrap;">
+                            {% if t.ativo %}
+                                <button type="button" class="botao"
+                                    onclick="abrirDesativar('{{ t.vinculo_id }}', '{{ t.tecnico }}')"
+                                    style="font-size: 0.8rem; padding: 6px 12px;">Desativar</button>
+                            {% else %}
+                                <button type="button" class="botao botao-dourado"
+                                    onclick="abrirVincular('{{ t.tecnico }}')"
+                                    style="font-size: 0.8rem; padding: 6px 12px;">
+                                    {{ "Reativar" if t.vinculo_id else "Preencher" }}
+                                </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal: vincular / preencher / reativar empresa -->
+    <dialog id="modal-vincular" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" action="/coordenador/tecnicos-empresa/salvar" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Vincular empresa</h2>
+            <input type="hidden" name="tecnico" id="campo-tecnico">
+            <p class="subtitulo" style="margin-bottom: 14px;">Técnico: <strong id="nome-tecnico-vincular"></strong></p>
+
+            <label>Empresa</label>
+            <input type="text" name="empresa" required>
+
+            <label>CNPJ da empresa</label>
+            <input type="text" name="cnpj_empresa" placeholder="00.000.000/0000-00">
+
+            <label>CPF do técnico</label>
+            <input type="text" name="cpf" placeholder="000.000.000-00">
+
+            <label>Data de início do contrato</label>
+            <input type="date" name="data_inicio" required>
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao botao-dourado">Salvar</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-vincular').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Modal: desativar vínculo -->
+    <dialog id="modal-desativar" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" action="/coordenador/tecnicos-empresa/desativar" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Desativar vínculo</h2>
+            <input type="hidden" name="vinculo_id" id="campo-vinculo-id">
+            <p class="subtitulo" style="margin-bottom: 14px;">Técnico: <strong id="nome-tecnico-desativar"></strong></p>
+
+            <label>Data de desligamento</label>
+            <input type="date" name="data_fim" required>
+
+            <label>Motivo</label>
+            <textarea name="motivo_desvinculo" required rows="3" placeholder="Ex: fim de contrato, mudança de empresa..."></textarea>
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao">Confirmar desativação</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-desativar').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script>
+        function abrirVincular(tecnico) {
+            document.getElementById('campo-tecnico').value = tecnico;
+            document.getElementById('nome-tecnico-vincular').textContent = tecnico;
+            document.getElementById('modal-vincular').showModal();
+        }
+        function abrirDesativar(vinculoId, tecnico) {
+            document.getElementById('campo-vinculo-id').value = vinculoId;
+            document.getElementById('nome-tecnico-desativar').textContent = tecnico;
+            document.getElementById('modal-desativar').showModal();
+        }
+    </script>
+</body>
+</html>

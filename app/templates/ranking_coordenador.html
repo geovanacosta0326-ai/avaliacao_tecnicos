@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Ranking — {{ mes_referencia }}</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>🏆 Ranking — {{ mes_referencia }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        <p class="subtitulo">
+            <a href="/coordenador?mes={{ mes_valor }}">← Voltar aos supervisores</a>
+            · <a href="/coordenador">Trocar mês</a>
+            · <a href="/coordenador/ranking-objetivo?mes={{ mes_valor }}">Ver ranking objetivo (visitas) →</a>
+        </p>
+
+        <h2 style="margin-top:24px;">Ranking de supervisores</h2>
+        <p class="subtitulo" style="margin-top:0;">Ordenado pela média das notas que cada supervisor deu aos seus técnicos.</p>
+        <ul class="lista-tecnicos">
+            {% for s in ranking_supervisores %}
+            <li>
+                <a href="/coordenador/{{ s.supervisor }}?mes={{ mes_valor }}" style="display:flex; justify-content:space-between; align-items:center; width:100%; text-decoration:none; color:inherit;">
+                    <span>
+                        {% if s.posicao == 1 %}🥇{% elif s.posicao == 2 %}🥈{% elif s.posicao == 3 %}🥉{% else %}{{ s.posicao }}º{% endif %}
+                        &nbsp;<strong>{{ s.supervisor }}</strong>
+                        <span style="color:#6b7280; font-size:0.85rem;">
+                            &nbsp;— {{ s.avaliados }}/{{ s.total }} técnico(s) avaliado(s)
+                        </span>
+                    </span>
+                    <span class="status avaliado">{{ s.media_supervisor }}</span>
+                </a>
+            </li>
+            {% else %}
+            <p>Nenhum supervisor lançou avaliação neste mês ainda.</p>
+            {% endfor %}
+        </ul>
+
+        <h2 style="margin-top:32px;">Ranking geral de técnicos</h2>
+        <p class="subtitulo" style="margin-top:0;">Todos os técnicos já avaliados neste mês, de todos os supervisores.</p>
+        <ul class="lista-tecnicos">
+            {% for t in ranking_tecnicos %}
+            <li>
+                <span>
+                    {% if t.posicao == 1 %}🥇{% elif t.posicao == 2 %}🥈{% elif t.posicao == 3 %}🥉{% else %}{{ t.posicao }}º{% endif %}
+                    &nbsp;{{ t.tecnico }}
+                    <span style="color:#6b7280; font-size:0.85rem;">&nbsp;— supervisor: {{ t.supervisor }}</span>
+                </span>
+                <span class="status avaliado">{{ t.nota_final }}</span>
+            </li>
+            {% else %}
+            <p>Nenhum técnico avaliado neste mês ainda.</p>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

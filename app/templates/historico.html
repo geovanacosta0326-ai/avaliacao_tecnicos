@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Minhas avaliações</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Minhas avaliações</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        {% if eh_coordenador %}
+        <p class="subtitulo">Histórico de todas as avaliações enviadas por todos os supervisores, agrupadas por mês. <a href="#" onclick="history.back(); return false;">← Voltar</a></p>
+        {% else %}
+        <p class="subtitulo">Histórico de todas as avaliações que você já enviou, agrupadas por mês. <a href="#" onclick="history.back(); return false;">← Voltar</a></p>
+        {% endif %}
+
+        {% if not grupos %}
+            <p>{{ "Nenhuma avaliação enviada ainda." if eh_coordenador else "Você ainda não enviou nenhuma avaliação." }}</p>
+        {% endif %}
+
+        {% for grupo in grupos %}
+        <details class="mes-grupo" {% if loop.first %}open{% endif %}>
+            <summary>
+                {{ grupo.mes_label }}
+                <span style="font-weight:400; color:#6b7280; font-size:0.85rem;">
+                    ({{ grupo.avaliacoes|length }} {{ "avaliação" if grupo.avaliacoes|length == 1 else "avaliações" }})
+                </span>
+            </summary>
+            <ul class="lista-tecnicos">
+                {% for a in grupo.avaliacoes %}
+                <li>
+                    <span>
+                        {{ a.tecnico }}
+                        {% if eh_coordenador %}
+                        <span style="font-weight:400; color:#6b7280; font-size:0.82rem;">— {{ a.supervisor }}</span>
+                        {% endif %}
+                    </span>
+                    <span style="display:flex; align-items:center; gap:14px;">
+                        {% if eh_coordenador %}
+                        <a href="/comparar/{{ a.tecnico | urlencode }}?sup={{ a.supervisor | urlencode }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">Comparar meses</a>
+                        {% else %}
+                        <a href="/comparar/{{ a.tecnico | urlencode }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">Comparar meses</a>
+                        {% endif %}
+                        <span class="status avaliado">Nota {{ a.nota_final }}</span>
+                        <a class="botao" style="margin:0; padding:6px 16px;" href="/minhas-avaliacoes/{{ a.id }}">Ver detalhes</a>
+                    </span>
+                </li>
+                {% endfor %}
+            </ul>
+        </details>
+        {% endfor %}
+    </div>
+</body>
+</html>

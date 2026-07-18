@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Visão Geral — Coordenador</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Visão Geral — Coordenador</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/coordenador" class="aba-ativa">Visão geral</a>
+            <a href="/coordenador/vinculos-tecnicos">Vínculos de técnicos</a>
+            <a href="/coordenador/ranking?mes={{ mes_valor }}">Ranking</a>
+        </nav>
+
+        <p class="subtitulo">
+            Avaliações referentes a <strong>{{ mes_referencia }}</strong>
+            · <a href="/coordenador">Trocar mês</a>
+            · <a href="/minhas-avaliacoes">Ver histórico geral →</a>
+            · <a href="/coordenador/exportar?mes={{ mes_valor }}">📥 Baixar planilha geral (Excel)</a>
+            · <a href="/coordenador/exportar-completo?mes={{ mes_valor }}">📥 Baixar completo (com respostas)</a>
+        </p>
+
+        <!-- KPIs -->
+        <div class="grade-kpi">
+            <div class="card-kpi verde">
+                <div class="card-kpi-label">Conclusão da rede</div>
+                <div class="card-kpi-valor">{{ visao.pct_conclusao }}%</div>
+                <div class="barra-progresso">
+                    <div class="barra-progresso-preenchimento" style="width: {{ visao.pct_conclusao }}%;"></div>
+                </div>
+                <div class="card-kpi-sub">{{ visao.total_avaliados }} de {{ visao.total_tecnicos }} técnicos avaliados</div>
+            </div>
+            <div class="card-kpi dourado">
+                <div class="card-kpi-label">Média geral da rede</div>
+                <div class="card-kpi-valor">{{ visao.media_geral if visao.media_geral is not none else "—" }}</div>
+                <div class="card-kpi-sub">Considerando todas as avaliações do mês</div>
+            </div>
+            <div class="card-kpi terracota">
+                <div class="card-kpi-label">Pendentes</div>
+                <div class="card-kpi-valor">{{ visao.total_pendentes }}</div>
+                <div class="card-kpi-sub">técnico(s) ainda sem avaliação</div>
+            </div>
+            <div class="card-kpi">
+                <div class="card-kpi-label">Supervisores</div>
+                <div class="card-kpi-valor">{{ resumo|length }}</div>
+                <div class="card-kpi-sub">{{ visao.nao_iniciados|length }} ainda não iniciaram</div>
+            </div>
+        </div>
+
+        <!-- Solicitações de prazo dos supervisores -->
+        {% if solicitacoes_pendentes %}
+        <div class="caixa-alerta">
+            <div class="caixa-alerta-titulo">📩 Solicitações de prazo pendentes</div>
+            <ul>
+                {% for s in solicitacoes_pendentes %}
+                <li>
+                    <strong>{{ s.supervisor }}</strong> pediu prazo para {{ s.mes_referencia_label }}
+                    {% if s.tecnico %}(estava avaliando {{ s.tecnico }}){% endif %}
+                    ·
+                    <a href="/coordenador/{{ s.supervisor }}?mes={{ s.mes_referencia_valor }}">Ver e decidir →</a>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- Configuração do prazo de avaliação -->
+        <div class="caixa-alerta" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+            <div>
+                <div class="caixa-alerta-titulo">🗓️ Prazo de avaliação de {{ mes_referencia }}</div>
+                <p style="margin:4px 0 0;">
+                    Os supervisores podem avaliar os técnicos de <strong>{{ mes_referencia }}</strong>
+                    até <strong>{{ data_limite_mes_exibicao }}</strong>. Depois disso, cada supervisor
+                    só consegue lançar avaliação se você autorizar (na tela do supervisor).
+                </p>
+            </div>
+            <form method="post" action="/coordenador/definir-prazo-do-mes" style="display:flex; align-items:center; gap:8px;">
+                <input type="hidden" name="mes" value="{{ mes_valor }}">
+                <label for="data_limite" style="margin:0;">Escolher data-limite:</label>
+                <input type="date" id="data_limite" name="data_limite" value="{{ data_limite_mes }}">
+                <button type="submit">Salvar prazo de {{ mes_referencia }}</button>
+            </form>
+        </div>
+
+        <!-- Alertas -->
+        {% if visao.nao_iniciados %}
+        <div class="caixa-alerta">
+            <div class="caixa-alerta-titulo">⚠️ Supervisores que ainda não lançaram nenhuma avaliação este mês</div>
+            <ul>
+                {% for s in visao.nao_iniciados %}
+                <li><a href="/coordenador/{{ s.supervisor }}?mes={{ mes_valor }}">{{ s.supervisor }}</a> — {{ s.total }} técnico(s) pendente(s)</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- Gráfico comparativo (CSS puro, sem depender de nenhuma biblioteca externa) -->
+        {% if grafico_base %}
+        <div class="cartao-grafico-barras">
+            <h2>Comparativo de médias por supervisor</h2>
+            <div class="grafico-barras">
+                {% for s in grafico_base %}
+                <div class="grafico-barras-linha">
+                    <span class="grafico-barras-nome" title="{{ s.supervisor }}">{{ s.supervisor }}</span>
+                    <div class="grafico-barras-trilho">
+                        <div class="grafico-barras-preenchimento" style="width: {{ s.percentual }}%;"></div>
+                    </div>
+                    <span class="grafico-barras-valor">{{ "%.2f"|format(s.media) }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <h2 style="margin-top:32px;">Supervisores</h2>
+        <p class="subtitulo" style="margin-top:-14px;">
+            Ordenar por: use os botões abaixo para mudar a ordem da lista.
+        </p>
+        <div class="abas-ordenar">
+            <a href="?mes={{ mes_valor }}&ordenar=nome" class="{{ 'ativa' if ordenar == 'nome' else '' }}">Nome (A–Z)</a>
+            <a href="?mes={{ mes_valor }}&ordenar=media" class="{{ 'ativa' if ordenar == 'media' else '' }}">Melhor média primeiro</a>
+            <a href="?mes={{ mes_valor }}&ordenar=pendentes" class="{{ 'ativa' if ordenar == 'pendentes' else '' }}">Mais pendentes primeiro</a>
+        </div>
+
+        <ul class="lista-tecnicos">
+            {% for s in resumo %}
+            <li{% if s.melhor_supervisor %} style="border: 2px solid #d4af37; background:#fffdf5;"{% endif %}>
+                <a class="linha-supervisor" href="/coordenador/{{ s.supervisor }}?mes={{ mes_valor }}">
+                    <div class="linha-supervisor-info">
+                        <div class="linha-supervisor-nome">{% if s.melhor_supervisor %}🏆 {% endif %}{{ s.supervisor }}</div>
+                        <div class="linha-supervisor-meta">
+                            {{ s.total }} técnico(s)
+                            {% if s.melhor_tecnico %}
+                                · melhor técnico: {{ s.melhor_tecnico }}{% if s.melhor_tecnico_media is not none %} ({{ s.melhor_tecnico_media }}){% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="linha-supervisor-badges">
+                        {% if s.media_supervisor is not none %}
+                            <span class="badge-media">média {{ s.media_supervisor }}</span>
+                        {% endif %}
+                        {% if s.pendentes == 0 %}
+                            <span class="status avaliado">✔ Completo ({{ s.avaliados }}/{{ s.total }})</span>
+                        {% else %}
+                            <span class="status pendente">{{ s.pendentes }} pendente(s) — {{ s.avaliados }}/{{ s.total }}</span>
+                        {% endif %}
+                    </div>
+                </a>
+            </li>
+            {% else %}
+            <p>Nenhum supervisor encontrado na base.</p>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Vínculos Supervisor-Técnico</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Vínculos supervisor-técnico</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/coordenador">Visão geral</a>
+            <a href="/coordenador/tecnicos-empresa">Empresa / contrato</a>
+            <a href="/coordenador/vinculos-supervisor-tecnico" class="aba-ativa">Vínculos supervisor-técnico</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+
+        <p class="subtitulo">
+            Auditoria — todos os vínculos ativos, de todos os supervisores.
+        </p>
+
+        <div class="tabela-comparativa-wrap">
+            <table class="tabela-comparativa" style="min-width: 560px;">
+                <thead>
+                    <tr>
+                        <th class="col-pergunta">Supervisor</th>
+                        <th>Técnico</th>
+                        <th>Na equipe desde</th>
+                        <th>1ª visita</th>
+                        <th>Última visita</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in vinculos %}
+                    <tr>
+                        <td class="col-pergunta">{{ v.supervisor }}</td>
+                        <td>{{ v.tecnico }}</td>
+                        <td>{{ v.mes_inicio.strftime("%m/%Y") }}</td>
+                        <td>{{ v.primeira_visita.strftime("%d/%m/%Y") if v.primeira_visita else "—" }}</td>
+                        <td>{{ v.ultima_visita.strftime("%d/%m/%Y") if v.ultima_visita else "—" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

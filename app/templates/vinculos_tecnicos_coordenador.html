@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Vínculos de Técnicos</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Vínculos de técnicos</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/coordenador">Visão geral</a>
+            <a href="/coordenador/vinculos-tecnicos" class="aba-ativa">Vínculos de técnicos</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+
+        <p class="subtitulo">Auditoria — todos os vínculos ativos, de todos os supervisores.</p>
+
+        <div class="tabela-comparativa-wrap">
+            <table class="tabela-comparativa" style="min-width: 980px;">
+                <thead>
+                    <tr>
+                        <th class="col-pergunta">Técnico</th>
+                        <th>CPF</th>
+                        <th>Projeto</th>
+                        <th>Atividade</th>
+                        <th>Empresa</th>
+                        <th>CNPJ</th>
+                        <th>Supervisor</th>
+                        <th>Início</th>
+                        <th>Fim previsto</th>
+                        <th>Última visita</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in vinculos %}
+                    <tr>
+                        <td class="col-pergunta">{{ v.tecnico }}</td>
+                        <td>{{ v.cpf or "—" }}</td>
+                        <td>{{ v.projeto or "—" }}</td>
+                        <td>{{ v.atividade or "—" }}</td>
+                        <td>{{ v.empresa or "—" }}</td>
+                        <td>{{ v.cnpj_empresa or "—" }}</td>
+                        <td>{{ v.supervisor }}</td>
+                        <td>{{ v.data_inicio.strftime("%d/%m/%Y") }}</td>
+                        <td>{{ v.data_fim_prevista.strftime("%d/%m/%Y") if v.data_fim_prevista else "—" }}</td>
+                        <td>{{ v.ultima_visita.strftime("%d/%m/%Y") if v.ultima_visita else "—" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

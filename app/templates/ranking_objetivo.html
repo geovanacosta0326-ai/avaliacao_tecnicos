@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Ranking objetivo — {{ mes_referencia }}</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>📊 Ranking objetivo (visitas) — {{ mes_referencia }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        <p class="subtitulo">
+            <a href="/coordenador/ranking?mes={{ mes_valor }}">← Ranking por avaliação</a>
+            · <a href="/coordenador?mes={{ mes_valor }}">Voltar aos supervisores</a>
+            · <a href="/coordenador">Trocar mês</a>
+        </p>
+        <p class="subtitulo" style="margin-top:0;">
+            Baseado nas visitas de {{ mes_referencia }} (propriedades ativas, orientações, taxa de validade etc — 7 indicadores de peso igual).
+            Independente da avaliação subjetiva (as 25 perguntas).
+        </p>
+
+        {% if not ranking_objetivo_por_supervisor %}
+        <p>Nenhum dado de visita encontrado em {{ mes_referencia }}.</p>
+        {% endif %}
+        {% for supervisor, tecnicos in ranking_objetivo_por_supervisor.items() %}
+        <details style="margin-bottom:10px; border:1px solid var(--borda); border-radius:12px; background:var(--areia-50);" {% if loop.first %}open{% endif %}>
+            <summary style="cursor:pointer; padding:12px 18px; font-weight:700; color:var(--verde-900);">
+                {{ supervisor }} <span style="font-weight:400; color:var(--texto-600); font-size:0.85rem;">— {{ tecnicos|length }} técnico(s)</span>
+            </summary>
+            <ul class="lista-tecnicos" style="margin:0 12px 12px;">
+                {% for t in tecnicos %}
+                <li style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                        <span>
+                            {% if t.pos == 1 %}🥇{% elif t.pos == 2 %}🥈{% elif t.pos == 3 %}🥉{% else %}{{ t.pos }}º{% endif %}
+                            &nbsp;{{ t.tecnico_responsavel }}
+                            <span style="color:var(--texto-600); font-size:0.85rem;">
+                                &nbsp;— {{ t.total_visitas_presenciais }} visita(s) · {{ t.pct_visitas_validas }}% válidas
+                            </span>
+                        </span>
+                        <span class="status avaliado">{{ (t.nota_objetiva * 100) | round(1) }}%</span>
+                    </div>
+                    <details>
+                        <summary style="cursor:pointer; font-size:0.8rem; color:var(--texto-600);">Ver todos os indicadores</summary>
+                        <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px; margin-top:10px; font-size:0.85rem;">
+                            <div>📁 Projeto: <strong>{{ t.ultimo_projeto or "—" }}</strong> (pos. {{ t.pos_projeto }}º)</div>
+                            <div>🌱 Atividade: <strong>{{ t.ultima_atividade or "—" }}</strong> (pos. {{ t.pos_atividade }}º)</div>
+                            <div>Propriedades ativas: <strong>{{ t.propriedades_ativas }}</strong> (peso {{ t.n_prop_ativas }})</div>
+                            <div>Propriedades inativas: <strong>{{ t.propriedades_inativas }}</strong> (peso {{ t.n_prop_inativas }})</div>
+                            <div>Total de visitas: <strong>{{ t.total_de_visitas }}</strong></div>
+                            <div>Visitas presenciais: <strong>{{ t.total_visitas_presenciais }}</strong> (peso {{ t.n_total_visitas }})</div>
+                            <div>Visitas válidas: <strong>{{ t.total_visitas_validas }}</strong> ({{ t.pct_visitas_validas }}%, peso {{ t.n_taxa_validade }})</div>
+                            <div>Orientações totais: <strong>{{ t.total_orientacoes_geral }}</strong> (peso {{ t.n_ori_geral }})</div>
+                            <div>Orientações concluídas: <strong>{{ t.total_orientacoes_concluidas }}</strong> ({{ t.pct_ori_concluidas }}%, peso {{ t.n_taxa_ori_concluidas }})</div>
+                            <div>Propriedades c/ múltiplos projetos: <strong>{{ t.qtd_multiplos_projetos }}</strong> (peso {{ t.n_multi_projetos }})</div>
+                        </div>
+                    </details>
+                </li>
+                {% endfor %}
+            </ul>
+        </details>
+        {% endfor %}
+    </div>
+</body>
+</html>

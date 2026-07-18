@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Técnicos — {{ mes_referencia }}</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Olá, {{ supervisor }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/">Técnicos da equipe</a>
+            <a href="/avaliacoes" class="aba-ativa">Avaliação dos técnicos</a>
+        </nav>
+
+        <p class="subtitulo">
+            Avaliação referente a <strong>{{ mes_referencia }}</strong>
+            · <a href="/avaliacoes">Trocar mês</a>
+            · <a href="/minhas-avaliacoes">Ver minhas avaliações anteriores</a>
+            · <a href="/exportar?mes={{ mes_valor }}">📥 Baixar planilha (Excel)</a>
+            · <a href="/exportar-completo?mes={{ mes_valor }}">📥 Baixar completo (com respostas)</a>
+        </p>
+
+        <!-- KPIs -->
+        <div class="grade-kpi">
+            <div class="card-kpi verde">
+                <div class="card-kpi-label">Conclusão do mês</div>
+                <div class="card-kpi-valor">{{ pct_conclusao }}%</div>
+                <div class="barra-progresso">
+                    <div class="barra-progresso-preenchimento" style="width: {{ pct_conclusao }}%;"></div>
+                </div>
+                <div class="card-kpi-sub">{{ avaliados }} de {{ total }} técnicos avaliados</div>
+            </div>
+            <div class="card-kpi dourado">
+                <div class="card-kpi-label">Soma dos pontos no mês</div>
+                <div class="card-kpi-valor">{{ soma_propria if soma_propria is not none else "—" }}</div>
+                <div class="card-kpi-sub">Soma das avaliações já lançadas</div>
+            </div>
+            <div class="card-kpi terracota">
+                <div class="card-kpi-label">Pendentes</div>
+                <div class="card-kpi-valor">{{ pendentes }}</div>
+                <div class="card-kpi-sub">técnico(s) ainda sem avaliação</div>
+            </div>
+        </div>
+
+        {% if prazo_encerrado %}
+        <div class="caixa-alerta">
+            <div class="caixa-alerta-titulo">⏳ Prazo encerrado em {{ data_limite }}</div>
+            {% if autorizado_apos_prazo %}
+            <p style="margin:4px 0 0;">Seu coordenador autorizou você a lançar avaliações de {{ mes_referencia }} mesmo assim.</p>
+            {% else %}
+            <p style="margin:4px 0 0;">Para lançar as avaliações pendentes deste mês, peça autorização ao coordenador.</p>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="caixa-alerta">
+            <div class="caixa-alerta-titulo">🗓️ Você pode avaliar {{ mes_referencia }} até {{ data_limite }}</div>
+        </div>
+        {% endif %}
+
+        {% if pendentes > 0 %}
+        <div class="caixa-alerta">
+            <div class="caixa-alerta-titulo">⚠️ Você ainda tem {{ pendentes }} técnico(s) pendente(s) neste mês</div>
+        </div>
+        {% endif %}
+
+        {% if ranking %}
+        <h2 style="margin-top:28px;">🏆 Ranking do mês</h2>
+        <ol style="margin:8px 0 0; padding-left:20px;">
+            {% for r in ranking %}
+            <li style="padding:2px 0;">
+                {% if r.posicao == 1 %}🥇{% elif r.posicao == 2 %}🥈{% elif r.posicao == 3 %}🥉{% else %}{{ r.posicao }}º{% endif %}
+                &nbsp;{{ r.tecnico }}
+                {% if r.nota_final is not none %}<strong>— {{ r.nota_final }}</strong>{% endif %}
+            </li>
+            {% endfor %}
+        </ol>
+        {% endif %}
+
+        <h2 style="margin-top:28px;">Seus técnicos</h2>
+        <ul class="lista-tecnicos">
+            {% for t in tecnicos %}
+            <li>
+                <span>{{ t.tecnico }}</span>
+                <span style="display:flex; align-items:center; gap:10px;">
+                    <a href="/comparar/{{ t.tecnico | urlencode }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">📈 Evolução</a>
+                    {% if t.avaliado %}
+                        <a class="status avaliado" href="/minhas-avaliacoes/{{ t.avaliacao_id }}" style="text-decoration:none;">✔ Avaliado · ver detalhe</a>
+                    {% else %}
+                        <a class="botao" href="/avaliar/{{ t.tecnico }}?mes={{ mes_valor }}" style="margin:0; padding:6px 16px;">Avaliar</a>
+                    {% endif %}
+                </span>
+            </li>
+            {% else %}
+            <p>Nenhum técnico vinculado a você foi encontrado na base.</p>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>
