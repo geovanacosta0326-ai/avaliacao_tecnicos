@@ -20,40 +20,101 @@
 
         <p class="subtitulo">Auditoria — todos os vínculos ativos, de todos os supervisores.</p>
 
-        <div class="tabela-comparativa-wrap">
-            <table class="tabela-comparativa" style="min-width: 980px;">
+        <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px;">
+            <div>
+                <label for="filtro-supervisor" style="display:block; font-size:0.82rem; font-weight:700; color:var(--verde-900); margin-bottom:6px;">Supervisor</label>
+                <select id="filtro-supervisor">
+                    <option value="">Todos</option>
+                    {% for s in vinculos | map(attribute='supervisor') | unique | sort %}
+                    <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="filtro-busca" style="display:block; font-size:0.82rem; font-weight:700; color:var(--verde-900); margin-bottom:6px;">Buscar técnico</label>
+                <input type="text" id="filtro-busca" placeholder="Nome do técnico…">
+            </div>
+            <span id="contador-linhas" style="color:var(--texto-600); font-size:0.85rem; padding-bottom:10px;"></span>
+        </div>
+
+        <div class="tabela-auditoria-wrap">
+            <table class="tabela-auditoria">
                 <thead>
                     <tr>
-                        <th class="col-pergunta">Técnico</th>
-                        <th>CPF</th>
+                        <th style="width:26px;"></th>
+                        <th>Técnico</th>
+                        <th>Supervisor</th>
                         <th>Projeto</th>
                         <th>Atividade</th>
-                        <th>Empresa</th>
-                        <th>CNPJ</th>
-                        <th>Supervisor</th>
-                        <th>Início</th>
-                        <th>Fim previsto</th>
-                        <th>Última visita</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for v in vinculos %}
-                    <tr>
-                        <td class="col-pergunta">{{ v.tecnico }}</td>
-                        <td>{{ v.cpf or "—" }}</td>
+                    <tr data-supervisor="{{ v.supervisor }}" data-tecnico="{{ v.tecnico | lower }}" class="linha-principal" onclick="toggleDetalhe(this)">
+                        <td class="col-seta">▸</td>
+                        <td class="col-tecnico"><a href="/tecnicos/{{ v.tecnico | urlencode }}" onclick="event.stopPropagation()">{{ v.tecnico }}</a></td>
+                        <td>{{ v.supervisor }}</td>
                         <td>{{ v.projeto or "—" }}</td>
                         <td>{{ v.atividade or "—" }}</td>
-                        <td>{{ v.empresa or "—" }}</td>
-                        <td>{{ v.cnpj_empresa or "—" }}</td>
-                        <td>{{ v.supervisor }}</td>
-                        <td>{{ v.data_inicio.strftime("%d/%m/%Y") }}</td>
-                        <td>{{ v.data_fim_prevista.strftime("%d/%m/%Y") if v.data_fim_prevista else "—" }}</td>
-                        <td>{{ v.ultima_visita.strftime("%d/%m/%Y") if v.ultima_visita else "—" }}</td>
+                    </tr>
+                    <tr data-supervisor="{{ v.supervisor }}" data-tecnico="{{ v.tecnico | lower }}" class="linha-detalhe" style="display:none;">
+                        <td></td>
+                        <td colspan="4">
+                            <div class="grade-detalhe">
+                                <div><span>CPF</span>{{ v.cpf or "—" }}</div>
+                                <div><span>Empresa</span>{{ v.empresa or "—" }}</div>
+                                <div><span>CNPJ</span>{{ v.cnpj_empresa or "—" }}</div>
+                                <div><span>Início</span>{{ v.data_inicio.strftime("%d/%m/%Y") }}</div>
+                                <div><span>Fim previsto</span>{{ v.data_fim_prevista.strftime("%d/%m/%Y") if v.data_fim_prevista else "—" }}</div>
+                                <div><span>Última visita</span>{{ v.ultima_visita.strftime("%d/%m/%Y") if v.ultima_visita else "—" }}</div>
+                            </div>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
+
+    <script>
+        function toggleDetalhe(linha) {
+            const detalhe = linha.nextElementSibling;
+            const seta = linha.querySelector('.col-seta');
+            const aberto = detalhe.style.display !== 'none';
+            detalhe.style.display = aberto ? 'none' : 'table-row';
+            seta.textContent = aberto ? '▸' : '▾';
+        }
+
+        const selectSupervisor = document.getElementById('filtro-supervisor');
+        const inputBusca = document.getElementById('filtro-busca');
+        const linhasPrincipais = Array.from(document.querySelectorAll('.tabela-auditoria .linha-principal'));
+        const contador = document.getElementById('contador-linhas');
+
+        function aplicarFiltro() {
+            const supervisor = selectSupervisor.value;
+            const busca = inputBusca.value.trim().toLowerCase();
+            let visiveis = 0;
+
+            linhasPrincipais.forEach(function (linha) {
+                const bateSupervisor = !supervisor || linha.dataset.supervisor === supervisor;
+                const bateBusca = !busca || linha.dataset.tecnico.includes(busca);
+                const mostra = bateSupervisor && bateBusca;
+                linha.style.display = mostra ? '' : 'none';
+                // Some junto o detalhe (se estava aberto) quando a linha principal é escondida pelo filtro
+                const detalhe = linha.nextElementSibling;
+                if (!mostra) {
+                    detalhe.style.display = 'none';
+                    linha.querySelector('.col-seta').textContent = '▸';
+                }
+                if (mostra) visiveis++;
+            });
+
+            contador.textContent = visiveis + ' de ' + linhasPrincipais.length + ' técnico(s)';
+        }
+
+        selectSupervisor.addEventListener('change', aplicarFiltro);
+        inputBusca.addEventListener('input', aplicarFiltro);
+        aplicarFiltro();
+    </script>
 </body>
 </html>

@@ -10,9 +10,26 @@
         @media print {
             .nao-imprimir { display: none !important; }
             .so-imprimir { display: block; }
-            body { background: #fff; }
-            .container { box-shadow: none; max-width: 100%; }
-            .lista-perguntas li { break-inside: avoid; page-break-inside: avoid; }
+            body { background: #fff; font-size: 11px; }
+            .container { box-shadow: none; max-width: 100%; padding: 0; }
+            .so-imprimir { margin-bottom: 4px; font-size: 1.1rem; }
+            .subtitulo { margin: 0 0 10px; font-size: 0.78rem; }
+            h2 { margin: 8px 0 6px; font-size: 0.95rem; }
+
+            .lista-perguntas {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 6px;
+                margin-top: 6px;
+            }
+            .lista-perguntas li {
+                padding: 6px 10px;
+                margin-bottom: 0;
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+            .lista-perguntas-pergunta { font-size: 0.74rem; line-height: 1.25; }
+            .lista-perguntas-resposta { font-size: 0.8rem; }
         }
     </style>
 </head>
@@ -27,6 +44,7 @@
         </div>
         <h1 class="so-imprimir">{{ avaliacao.tecnico }}</h1>
         <p class="subtitulo">
+            Avaliado por: <strong>{{ avaliacao.supervisor }}</strong> ·
             Referência: {{ mes_referencia }} ·
             Enviada em {{ avaliacao.data_avaliacao.strftime("%d/%m/%Y às %H:%M") }} ·
             Nota final:

@@ -8,6 +8,7 @@ Substitui repositorio_tecnico_empresa.py e repositorio_tecnico_supervisor.py
 from sqlalchemy import text
 from app.database import get_engine
 from app.repositorio import normalizar
+from datetime import date
 
 # Motivos padronizados de desvínculo (o formulário usa estes + "Outro").
 MOTIVOS_DESVINCULACAO = [
@@ -30,8 +31,8 @@ WITH visitas AS (
     SELECT
         tecnico_responsavel AS tecnico,
         dt_visita_v,
-        projeto_consolidado,
-        FIRST_VALUE(projeto_consolidado) OVER (
+        projeto,
+        FIRST_VALUE(projeto) OVER (
             PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
         ) AS projeto_atual,
         FIRST_VALUE(atividade) OVER (
@@ -46,7 +47,7 @@ WITH visitas AS (
 )
 SELECT DISTINCT ON (tecnico)
     tecnico,
-    MIN(dt_visita_v) FILTER (WHERE projeto_consolidado IS NOT DISTINCT FROM projeto_atual)
+    MIN(dt_visita_v) FILTER (WHERE projeto IS NOT DISTINCT FROM projeto_atual)
         OVER (PARTITION BY tecnico) AS primeira_visita,
     ultima_visita,
     projeto_atual AS projeto_consolidado,
@@ -91,13 +92,21 @@ def listar_vinculos_do_supervisor(supervisor: str):
     return [dict(l) for l in linhas]
 
 
-def listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor: str):
+def listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor: str, mes_limite):
     """
     Técnicos que hoje são NATURALMENTE deste supervisor (pelo supervisor_atual
     da visita mais recente, na base de visitas) e que ainda não têm vínculo
     ativo com ele. Isso evita mostrar o técnico de todo mundo — só aparece
     quem já é do supervisor pela base de origem, esperando ser complementado
     com os dados do vínculo (projeto, atividade, empresa, CPF, datas).
+
+    Só entram aqui os técnicos que JÁ FORAM DESVINCULADOS antes (por isso
+    não entraram na vinculação automática) — os que nunca tiveram vínculo
+    e têm visita recente já viram "Ativo" sozinhos.
+
+    `mes_limite`: só mostra quem teve última visita a partir dessa data
+    (calculado como "até 2 meses antes do mês atual") — evita acumular
+    técnico antigo, sem visita há muito tempo, nessa lista.
 
     Também traz projeto_consolidado e atividade da visita mais recente, para
     sugerir no formulário de complementar cadastro (o supervisor pode ajustar).
@@ -112,6 +121,7 @@ def listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor: str):
         LEFT JOIN vinculo_tecnico v_outro
             ON v_outro.tecnico = vis.tecnico AND v_outro.data_desvinculacao IS NULL
         WHERE vis.supervisor_atual = :supervisor
+          AND vis.ultima_visita >= :mes_limite
           AND vis.tecnico NOT IN (
               SELECT tecnico FROM vinculo_tecnico
               WHERE supervisor = :supervisor AND data_desvinculacao IS NULL
@@ -119,7 +129,7 @@ def listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor: str):
         ORDER BY vis.tecnico;
     """
     with engine.connect() as conn:
-        linhas = conn.execute(text(query), {"supervisor": supervisor}).mappings().all()
+        linhas = conn.execute(text(query), {"supervisor": supervisor, "mes_limite": mes_limite}).mappings().all()
     return [dict(l) for l in linhas]
 
 
@@ -147,8 +157,8 @@ def obter_visita_tecnico(tecnico: str):
                     SELECT
                         tecnico_responsavel AS tecnico,
                         dt_visita_v,
-                        projeto_consolidado,
-                        FIRST_VALUE(projeto_consolidado) OVER (
+                        projeto,
+                        FIRST_VALUE(projeto) OVER (
                             PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
                         ) AS projeto_atual,
                         FIRST_VALUE(atividade) OVER (
@@ -163,7 +173,7 @@ def obter_visita_tecnico(tecnico: str):
                 )
                 SELECT DISTINCT ON (tecnico)
                     tecnico,
-                    MIN(dt_visita_v) FILTER (WHERE projeto_consolidado IS NOT DISTINCT FROM projeto_atual)
+                    MIN(dt_visita_v) FILTER (WHERE projeto IS NOT DISTINCT FROM projeto_atual)
                         OVER (PARTITION BY tecnico) AS primeira_visita,
                     ultima_visita,
                     projeto_atual AS projeto_consolidado,
@@ -250,6 +260,152 @@ def listar_todos_vinculos_ativos():
     return [dict(l) for l in linhas]
 
 
+def auto_desvincular_tecnicos_inativos(supervisor: str, mes_limite) -> int:
+    """
+    Desvincula automaticamente (mantendo o histórico, nunca apaga) todo
+    técnico que está ATIVO com este supervisor mas NÃO tem visita recente
+    (>= mes_limite) — seja porque parou de visitar, seja porque não tem
+    visita nenhuma registrada pra ele.
+
+    Isso é o "espelho" do auto_vincular_tecnicos_recentes: um cuida de
+    trazer quem começou a aparecer, o outro cuida de tirar quem sumiu.
+
+    Retorna quantos técnicos foram desvinculados agora.
+    """
+    engine = get_engine()
+    query = f"""
+        SELECT v.id AS vinculo_id, v.tecnico
+        FROM vinculo_tecnico v
+        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON vis.tecnico = v.tecnico
+        WHERE v.supervisor = :supervisor
+          AND v.data_desvinculacao IS NULL
+          AND (vis.ultima_visita IS NULL OR vis.ultima_visita < :mes_limite);
+    """
+    with engine.connect() as conn:
+        inativos = conn.execute(text(query), {"supervisor": supervisor, "mes_limite": mes_limite}).mappings().all()
+
+    processados = 0
+    for i in inativos:
+        try:
+            desvincular_vinculo(
+                vinculo_id=i["vinculo_id"],
+                data_desvinculacao=date.today(),
+                motivo="Sem visita nos últimos 2 meses (desvinculado automaticamente)",
+            )
+            processados += 1
+        except Exception:
+            continue
+
+    return processados
+
+
+def auto_vincular_tecnicos_recentes(supervisor: str, mes_limite) -> int:
+    """
+    Vincula automaticamente (sem o supervisor precisar clicar em nada) todo
+    técnico cuja visita mais recente (dentro do período recente, mes_limite)
+    aponta este supervisor como responsável (supervisor_atual). Cobre dois
+    casos:
+
+    1) Técnico NUNCA teve nenhum vínculo (ativo ou encerrado) com este
+       supervisor, e não está ativo com nenhum outro agora — cria um vínculo
+       novo direto.
+
+    2) Técnico está com vínculo ATIVO em OUTRO supervisor, mas a visita mais
+       recente já aponta para este supervisor (ou seja, ele mudou de equipe
+       na base de visitas) — o sistema ENCERRA o vínculo antigo (guardando
+       o histórico, nunca apaga) com o motivo "Mudança de supervisor
+       (conforme visita mais recente)", e cria um vínculo novo aqui.
+
+    Isso NÃO reativa técnico que o PRÓPRIO supervisor atual já desvinculou
+    antes — esse continua parado em "Não vinculado" até ele vincular de novo
+    manualmente (o desvincular é uma decisão que "vale", não é sobrescrita
+    automaticamente só porque ele segue visitando).
+
+    Projeto/atividade entram já preenchidos com a sugestão da visita mais
+    recente; CPF/empresa/CNPJ ficam em branco — o supervisor edita quando
+    quiser (tem autonomia total sobre esses dados).
+
+    Retorna quantos técnicos foram vinculados (criados ou migrados) agora.
+    """
+    engine = get_engine()
+
+    # Caso 1: nunca teve vínculo nenhum com este supervisor, e não está
+    # ativo com ninguém agora.
+    query_novos = f"""
+        SELECT vis.tecnico, vis.primeira_visita, vis.projeto_consolidado, vis.atividade
+        FROM ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis
+        WHERE vis.supervisor_atual = :supervisor
+          AND vis.ultima_visita >= :mes_limite
+          AND vis.tecnico NOT IN (
+              SELECT tecnico FROM vinculo_tecnico WHERE supervisor = :supervisor
+          )
+          AND vis.tecnico NOT IN (
+              SELECT tecnico FROM vinculo_tecnico WHERE data_desvinculacao IS NULL
+          );
+    """
+
+    # Caso 2: está ativo com OUTRO supervisor, mas a visita recente já
+    # aponta para este supervisor — precisa migrar.
+    query_migrar = f"""
+        SELECT vis.tecnico, vis.primeira_visita, vis.projeto_consolidado, vis.atividade,
+               v_antigo.id AS vinculo_antigo_id, v_antigo.supervisor AS supervisor_antigo
+        FROM ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis
+        JOIN vinculo_tecnico v_antigo
+            ON v_antigo.tecnico = vis.tecnico
+            AND v_antigo.data_desvinculacao IS NULL
+            AND v_antigo.supervisor <> :supervisor
+        WHERE vis.supervisor_atual = :supervisor
+          AND vis.ultima_visita >= :mes_limite;
+    """
+
+    with engine.connect() as conn:
+        candidatos_novos = conn.execute(
+            text(query_novos), {"supervisor": supervisor, "mes_limite": mes_limite}
+        ).mappings().all()
+        candidatos_migrar = conn.execute(
+            text(query_migrar), {"supervisor": supervisor, "mes_limite": mes_limite}
+        ).mappings().all()
+
+    processados = 0
+
+    for c in candidatos_novos:
+        try:
+            criar_vinculo(
+                tecnico=c["tecnico"],
+                supervisor=supervisor,
+                data_inicio=c["primeira_visita"],
+                criado_por="sistema (auto-vínculo por visita recente)",
+                projeto=c["projeto_consolidado"],
+                atividade=c["atividade"],
+            )
+            processados += 1
+        except Exception:
+            # Não deixa uma falha pontual (ex: condição de corrida rara)
+            # travar a tela inteira — só pula esse técnico dessa vez.
+            continue
+
+    for c in candidatos_migrar:
+        try:
+            desvincular_vinculo(
+                vinculo_id=c["vinculo_antigo_id"],
+                data_desvinculacao=date.today(),
+                motivo=f"Mudança de supervisor (visita mais recente aponta para {supervisor})",
+            )
+            criar_vinculo(
+                tecnico=c["tecnico"],
+                supervisor=supervisor,
+                data_inicio=c["primeira_visita"],
+                criado_por="sistema (auto-vínculo por mudança de supervisor)",
+                projeto=c["projeto_consolidado"],
+                atividade=c["atividade"],
+            )
+            processados += 1
+        except Exception:
+            continue
+
+    return processados
+
+
 def criar_vinculo(
     tecnico: str, supervisor: str, data_inicio, criado_por: str,
     cpf: str = None, projeto: str = None, atividade: str = None,
@@ -288,13 +444,13 @@ def criar_vinculo(
 
 def editar_vinculo(
     vinculo_id: int, cpf: str = None, projeto: str = None, atividade: str = None,
-    empresa: str = None, cnpj_empresa: str = None, data_fim_prevista=None,
+    empresa: str = None, cnpj_empresa: str = None, data_inicio=None, data_fim_prevista=None,
 ):
     """
     Atualiza os dados do vínculo ATIVO (corrigir projeto, atividade,
-    empresa, CNPJ, CPF, data prevista de fim) — não cria um novo registro
-    histórico, é edição do vínculo corrente. Desvincular é uma ação
-    separada (ver desvincular_vinculo).
+    empresa, CNPJ, CPF, início, data prevista de fim) — não cria um novo
+    registro histórico, é edição do vínculo corrente. Desvincular é uma
+    ação separada (ver desvincular_vinculo).
     """
     engine = get_engine()
     with engine.begin() as conn:
@@ -303,6 +459,7 @@ def editar_vinculo(
                 UPDATE vinculo_tecnico
                 SET cpf = :cpf, projeto = :projeto, atividade = :atividade,
                     empresa = :empresa, cnpj_empresa = :cnpj_empresa,
+                    data_inicio = COALESCE(:data_inicio, data_inicio),
                     data_fim_prevista = :data_fim_prevista,
                     atualizado_em = NOW()
                 WHERE id = :id
@@ -314,6 +471,7 @@ def editar_vinculo(
                 "atividade": atividade or None,
                 "empresa": empresa or None,
                 "cnpj_empresa": cnpj_empresa or None,
+                "data_inicio": data_inicio or None,
                 "data_fim_prevista": data_fim_prevista or None,
             },
         )

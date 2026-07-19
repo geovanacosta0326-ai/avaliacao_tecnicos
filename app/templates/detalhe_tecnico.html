@@ -12,7 +12,7 @@
             <a href="/logout">Sair</a>
         </div>
         <p class="subtitulo">
-            <a href="/">← Voltar para Técnicos da equipe</a>
+            <a href="#" onclick="history.back(); return false;">← Voltar</a>
         </p>
 
         <p class="subtitulo">
@@ -20,9 +20,12 @@
             · última visita: {{ visita.ultima_visita.strftime("%d/%m/%Y") if visita.ultima_visita else "—" }}
         </p>
 
-        {% if vinculo_ativo and eh_meu %}
-        <!-- Vínculo ativo, é da MINHA equipe: mostra os dados e as ações -->
+        {% if vinculo_ativo and (eh_meu or eh_coordenador) %}
+        <!-- Vínculo ativo, é da MINHA equipe (ou eu sou coordenador): mostra os dados e as ações -->
         <h2>Vínculo atual</h2>
+        {% if not eh_meu %}
+        <p class="subtitulo" style="margin-top:-8px;">Vinculado à equipe de <strong>{{ vinculo_ativo.supervisor }}</strong>.</p>
+        {% endif %}
         <table style="width:100%; font-size:0.92rem; margin-bottom:18px;">
             <tr><td style="color:var(--texto-600); padding:6px 0; width:40%;">CPF</td><td>{{ vinculo_ativo.cpf or "—" }}</td></tr>
             <tr><td style="color:var(--texto-600); padding:6px 0;">Projeto</td><td>{{ visita.projeto_consolidado or vinculo_ativo.projeto or "—" }}</td></tr>
@@ -35,12 +38,17 @@
         </table>
 
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            {% if eh_meu %}
             <a class="botao botao-dourado" href="/avaliar/{{ tecnico }}">Avaliar técnico</a>
+            {% endif %}
             <button type="button" class="botao" onclick="document.getElementById('modal-editar').showModal()">Editar vínculo</button>
+            {% if eh_coordenador %}
+            <button type="button" class="botao" onclick="document.getElementById('modal-mudar-supervisor').showModal()">Mudar de supervisor</button>
+            {% endif %}
             <button type="button" class="botao" onclick="document.getElementById('modal-desvincular').showModal()">Desvincular técnico</button>
         </div>
 
-        {% elif vinculo_ativo and not eh_meu %}
+        {% elif vinculo_ativo and not eh_meu and not eh_coordenador %}
         <!-- Vínculo ativo, mas com OUTRO supervisor: só leitura, sem ações -->
         <div class="aviso">
             Este técnico está hoje vinculado à equipe de <strong>{{ vinculo_ativo.supervisor }}</strong>.
@@ -61,6 +69,16 @@
         </p>
         <form method="post" action="/tecnicos/criar">
             <input type="hidden" name="tecnico" value="{{ tecnico }}">
+
+            {% if eh_coordenador %}
+            <label>Vincular ao supervisor</label>
+            <select name="supervisor_escolhido" required>
+                <option value="">Escolha o supervisor…</option>
+                {% for s in todos_supervisores %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
 
             <label>CPF</label>
             <input type="text" name="cpf" placeholder="000.000.000-00">
@@ -101,7 +119,7 @@
         {% endif %}
     </div>
 
-    {% if vinculo_ativo and eh_meu %}
+    {% if vinculo_ativo and (eh_meu or eh_coordenador) %}
     <!-- Modal: editar vínculo -->
     <dialog id="modal-editar" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
         <form method="post" action="/tecnicos/editar" style="padding: 24px 28px; min-width: 320px; max-width: 400px;">
@@ -118,6 +136,9 @@
                 Projeto e atividade vêm direto da base de visitas e não são editáveis aqui.
             </p>
 
+            <label>Início do vínculo</label>
+            <input type="date" name="data_inicio" value="{{ vinculo_ativo.data_inicio.strftime('%Y-%m-%d') if vinculo_ativo.data_inicio else '' }}">
+
             <label>Empresa responsável</label>
             <input type="text" name="empresa" value="{{ vinculo_ativo.empresa or '' }}">
 
@@ -133,6 +154,40 @@
             </div>
         </form>
     </dialog>
+
+    {% if eh_coordenador %}
+    <!-- Modal: mudar de supervisor (só coordenador) -->
+    <dialog id="modal-mudar-supervisor" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" action="/tecnicos/mudar-supervisor" style="padding: 24px 28px; min-width: 320px; max-width: 400px;">
+            <h2 style="margin-top:0;">Mudar de supervisor</h2>
+            <input type="hidden" name="vinculo_id" value="{{ vinculo_ativo.id }}">
+            <input type="hidden" name="tecnico" value="{{ tecnico }}">
+
+            <p class="subtitulo" style="margin-top:0;">
+                Atualmente com <strong>{{ vinculo_ativo.supervisor }}</strong>. Projeto, atividade, empresa e CPF
+                são mantidos — só o supervisor muda.
+            </p>
+
+            <label>Novo supervisor</label>
+            <select name="novo_supervisor" required>
+                <option value="">Escolha…</option>
+                {% for s in todos_supervisores %}
+                {% if s != vinculo_ativo.supervisor %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+
+            <label>Data da mudança</label>
+            <input type="date" name="data_mudanca" required>
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao botao-dourado">Confirmar mudança</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-mudar-supervisor').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+    {% endif %}
 
     <!-- Modal: desvincular técnico -->
     <dialog id="modal-desvincular" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">

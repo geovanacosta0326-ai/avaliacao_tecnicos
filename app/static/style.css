@@ -233,6 +233,39 @@ button:active, .botao:active { transform: translateY(0); }
 
 /* ── Tabela de comparação entre meses ─────────────────────── */
 .tabela-comparativa-wrap { overflow-x: auto; margin-top: 18px; border: 1px solid var(--borda); border-radius: 12px; }
+
+/* ── Tela "auditoria de vínculos" — tabela compacta, detalhe expande ao clicar ── */
+.tabela-auditoria-wrap { overflow-x: auto; border: 1px solid var(--borda); border-radius: 12px; }
+.tabela-auditoria { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.tabela-auditoria thead th {
+    background: linear-gradient(135deg, var(--verde-800), var(--verde-700));
+    color: #fff; font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 0.78rem;
+    text-transform: uppercase; letter-spacing: 0.02em;
+    padding: 10px 14px; text-align: left; position: sticky; top: 0;
+}
+.tabela-auditoria td {
+    padding: 9px 14px; text-align: left; white-space: nowrap;
+    color: var(--texto-900);
+}
+.tabela-auditoria .linha-principal { cursor: pointer; }
+.tabela-auditoria .col-seta { color: var(--texto-600); font-size: 0.72rem; width: 24px; padding-right: 0; }
+.tabela-auditoria td.col-tecnico { font-weight: 600; }
+.tabela-auditoria td.col-tecnico a { color: var(--verde-800); text-decoration: none; }
+.tabela-auditoria td.col-tecnico a:hover { text-decoration: underline; }
+.tabela-auditoria .linha-principal:not(:last-child) td,
+.tabela-auditoria .linha-detalhe td { border-bottom: 1px solid var(--borda); }
+.tabela-auditoria .linha-principal:hover { background: rgba(74, 155, 116, 0.08); }
+.tabela-auditoria .linha-detalhe td { white-space: normal; background: var(--areia-50); padding: 12px 14px 14px 38px; }
+.grade-detalhe {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px 20px;
+    font-size: 0.8rem;
+}
+.grade-detalhe div span {
+    display: block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; color: var(--texto-600); margin-bottom: 2px;
+}
 .tabela-comparativa { width: 100%; border-collapse: collapse; font-size: 0.88rem; min-width: 480px; }
 .tabela-comparativa thead th {
     background: linear-gradient(135deg, var(--verde-800), var(--verde-700));

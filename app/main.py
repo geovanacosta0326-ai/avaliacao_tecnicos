@@ -484,8 +484,20 @@ def tela_gestao_tecnicos(request: Request):
     if request.session.get("tipo") == "coordenador":
         return RedirectResponse("/coordenador", status_code=303)
 
+    # "Até 2 meses antes do mês atual" — ex: hoje é julho/2026, então
+    # mes_limite = 01/05/2026 (maio, junho, julho contam como "recente").
+    hoje = date.today()
+    ano, mes = hoje.year, hoje.month - 2
+    while mes <= 0:
+        mes += 12
+        ano -= 1
+    mes_limite = date(ano, mes, 1)
+
+    repositorio_vinculo_tecnico.auto_desvincular_tecnicos_inativos(supervisor, mes_limite)
+    repositorio_vinculo_tecnico.auto_vincular_tecnicos_recentes(supervisor, mes_limite)
+
     todos_vinculos = repositorio_vinculo_tecnico.listar_vinculos_do_supervisor(supervisor)
-    disponiveis = repositorio_vinculo_tecnico.listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor)
+    disponiveis = repositorio_vinculo_tecnico.listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor, mes_limite)
     return templates.TemplateResponse(
         "gestao_tecnicos.html",
         {
@@ -516,6 +528,7 @@ def tela_detalhe_tecnico(request: Request, tecnico: str):
     historico = repositorio_vinculo_tecnico.historico_tecnico(tecnico)
 
     eh_meu = vinculo_ativo is not None and vinculo_ativo["supervisor"] == supervisor
+    eh_coordenador = request.session.get("tipo") == "coordenador"
     return templates.TemplateResponse(
         "detalhe_tecnico.html",
         {
@@ -524,6 +537,8 @@ def tela_detalhe_tecnico(request: Request, tecnico: str):
             "tecnico": tecnico,
             "vinculo_ativo": vinculo_ativo,
             "eh_meu": eh_meu,
+            "eh_coordenador": eh_coordenador,
+            "todos_supervisores": repositorio.listar_supervisores() if eh_coordenador else [],
             "visita": visita,
             "historico": [h for h in historico if h["data_desvinculacao"] is not None],
             "motivos": repositorio_vinculo_tecnico.MOTIVOS_DESVINCULACAO,
@@ -542,14 +557,20 @@ def criar_vinculo_tecnico(
     cnpj_empresa: str = Form(""),
     data_inicio: date = Form(...),
     data_fim_prevista: date | None = Form(None),
+    supervisor_escolhido: str | None = Form(default=None),
 ):
     supervisor = supervisor_logado(request)
     if not supervisor:
         return RedirectResponse("/login", status_code=303)
 
+    # Coordenador pode vincular em nome de qualquer supervisor (escolhendo
+    # no formulário); supervisor comum sempre vincula em nome dele mesmo.
+    eh_coordenador = request.session.get("tipo") == "coordenador"
+    supervisor_do_vinculo = supervisor_escolhido if (eh_coordenador and supervisor_escolhido) else supervisor
+
     repositorio_vinculo_tecnico.criar_vinculo(
         tecnico=tecnico,
-        supervisor=supervisor,
+        supervisor=supervisor_do_vinculo,
         data_inicio=data_inicio,
         data_fim_prevista=data_fim_prevista,
         cpf=cpf,
@@ -572,6 +593,7 @@ def editar_vinculo_tecnico(
     atividade: str = Form(""),
     empresa: str = Form(""),
     cnpj_empresa: str = Form(""),
+    data_inicio: date | None = Form(None),
     data_fim_prevista: date | None = Form(None),
 ):
     supervisor = supervisor_logado(request)
@@ -585,7 +607,46 @@ def editar_vinculo_tecnico(
         atividade=atividade,
         empresa=empresa,
         cnpj_empresa=cnpj_empresa,
+        data_inicio=data_inicio,
         data_fim_prevista=data_fim_prevista,
+    )
+    return RedirectResponse(f"/tecnicos/{tecnico}", status_code=303)
+
+
+@app.post("/tecnicos/mudar-supervisor")
+def mudar_supervisor_tecnico(
+    request: Request,
+    vinculo_id: int = Form(...),
+    tecnico: str = Form(...),
+    novo_supervisor: str = Form(...),
+    data_mudanca: date = Form(...),
+):
+    """Só o coordenador vê esse botão — troca o supervisor de um técnico
+    em um único passo, mantendo projeto/atividade/empresa/CPF do vínculo atual."""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    vinculo_atual = repositorio_vinculo_tecnico.obter_vinculo(vinculo_id)
+    if vinculo_atual is None:
+        raise HTTPException(status_code=404, detail="Vínculo não encontrado.")
+
+    repositorio_vinculo_tecnico.desvincular_vinculo(
+        vinculo_id=vinculo_id,
+        data_desvinculacao=data_mudanca,
+        motivo=f"Mudança de supervisor (definido pelo coordenador, antes com {vinculo_atual['supervisor']})",
+    )
+    repositorio_vinculo_tecnico.criar_vinculo(
+        tecnico=tecnico,
+        supervisor=novo_supervisor,
+        data_inicio=data_mudanca,
+        criado_por=request.session.get("login", "coordenador"),
+        cpf=vinculo_atual.get("cpf"),
+        projeto=vinculo_atual.get("projeto"),
+        atividade=vinculo_atual.get("atividade"),
+        empresa=vinculo_atual.get("empresa"),
+        cnpj_empresa=vinculo_atual.get("cnpj_empresa"),
     )
     return RedirectResponse(f"/tecnicos/{tecnico}", status_code=303)
 
@@ -824,14 +885,14 @@ def tela_avaliar(request: Request, tecnico: str, mes: str | None = Query(default
     if not supervisor:
         return RedirectResponse("/login", status_code=303)
 
-    tecnicos_permitidos = repositorio.listar_tecnicos_do_supervisor(supervisor)
+    mes_ref = resolver_mes_escolhido(mes)
+    meses_disponiveis = lista_meses_para_template()
+
+    tecnicos_permitidos = repositorio.tecnicos_do_supervisor_no_mes(supervisor, mes_ref)
     tecnico_real = repositorio.encontrar_tecnico(tecnico, tecnicos_permitidos)
     if tecnico_real is None:
         raise HTTPException(status_code=403, detail="Você não pode avaliar este técnico.")
     tecnico = tecnico_real  # a partir daqui, sempre o nome exato como está no banco
-
-    mes_ref = resolver_mes_escolhido(mes)
-    meses_disponiveis = lista_meses_para_template()
 
     if avaliacoes.ja_avaliado(supervisor, tecnico, mes_ref):
         return templates.TemplateResponse(
@@ -878,14 +939,14 @@ async def salvar_avaliacao(request: Request, tecnico: str):
     if not supervisor:
         return RedirectResponse("/login", status_code=303)
 
-    tecnicos_permitidos = repositorio.listar_tecnicos_do_supervisor(supervisor)
+    form = await request.form()
+    mes_ref = resolver_mes_escolhido(form.get("mes_referencia"))
+
+    tecnicos_permitidos = repositorio.tecnicos_do_supervisor_no_mes(supervisor, mes_ref)
     tecnico_real = repositorio.encontrar_tecnico(tecnico, tecnicos_permitidos)
     if tecnico_real is None:
         raise HTTPException(status_code=403, detail="Você não pode avaliar este técnico.")
     tecnico = tecnico_real  # a partir daqui, sempre o nome exato como está no banco
-
-    form = await request.form()
-    mes_ref = resolver_mes_escolhido(form.get("mes_referencia"))
 
     if avaliacoes.ja_avaliado(supervisor, tecnico, mes_ref):
         return RedirectResponse("/avaliacoes", status_code=303)

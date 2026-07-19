@@ -400,13 +400,47 @@ def recusar_solicitacao(solicitacao_id: int, coordenador: str) -> None:
         )
 
 
+def tecnicos_do_supervisor_no_mes(supervisor: str, mes_ref: date):
+    """
+    Técnicos que este supervisor tinha NAQUELE MÊS específico (mes_ref) —
+    baseado em quem teve visita registrada nesse mês com supervisor_atual
+    igual a este supervisor. Isso é diferente de "quem está vinculado hoje":
+    um técnico que trabalhou com esse supervisor em junho continua entrando
+    na avaliação de junho, mesmo que hoje (em julho, agosto...) ele já
+    tenha sido desvinculado (por qualquer motivo, manual ou automático).
+    """
+    import calendar
+    ultimo_dia = calendar.monthrange(mes_ref.year, mes_ref.month)[1]
+    inicio_mes = date(mes_ref.year, mes_ref.month, 1)
+    fim_mes = date(mes_ref.year, mes_ref.month, ultimo_dia)
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT DISTINCT tecnico_responsavel AS tecnico
+                FROM acompanhamento_mensal_visitas
+                WHERE supervisor_atual = :supervisor
+                  AND dt_visita BETWEEN :inicio_mes AND :fim_mes
+                ORDER BY tecnico_responsavel;
+            """),
+            {"supervisor": supervisor, "inicio_mes": inicio_mes, "fim_mes": fim_mes},
+        ).fetchall()
+    return [r.tecnico for r in rows]
+
+
 def tecnicos_com_status_para_mes(supervisor: str, mes_ref: date):
     """
     Retorna a lista de técnicos do supervisor + se já foram avaliados
     NO MÊS ESCOLHIDO (mes_ref) — usado depois que o supervisor seleciona
     o mês/ano na tela inicial e entra na tela dos técnicos.
+
+    IMPORTANTE: os técnicos considerados são os que o supervisor tinha
+    NAQUELE MÊS (pelas visitas), não quem está vinculado a ele hoje — um
+    técnico avaliado em junho continua na lista de junho mesmo que tenha
+    sido desvinculado depois (em julho, agosto...).
     """
-    tecnicos = listar_tecnicos_do_supervisor(supervisor)
+    tecnicos = tecnicos_do_supervisor_no_mes(supervisor, mes_ref)
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -811,7 +845,7 @@ def tecnicos_com_avaliacao_para_mes(supervisor: str, mes_ref: date):
     da avaliação (quando existe) — usado na tela do coordenador para linkar
     direto para o detalhe da avaliação de cada técnico.
     """
-    tecnicos = listar_tecnicos_do_supervisor(supervisor)
+    tecnicos = tecnicos_do_supervisor_no_mes(supervisor, mes_ref)
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -891,10 +925,10 @@ UltimoSupervisorPorTecnico AS (
     ORDER BY tecnico_responsavel, dt_visita DESC
 ),
 UltimoProjetoPorTecnico AS (
-    SELECT DISTINCT ON (tecnico_responsavel) tecnico_responsavel, projeto_consolidado AS ultimo_projeto
+    SELECT DISTINCT ON (tecnico_responsavel) tecnico_responsavel, projeto AS ultimo_projeto
     FROM public.acompanhamento_mensal_visitas
     WHERE dt_visita BETWEEN (SELECT dt_inicio FROM Parametros) AND (SELECT dt_fim FROM Parametros)
-      AND projeto_consolidado IS NOT NULL
+      AND projeto IS NOT NULL
     ORDER BY tecnico_responsavel, dt_visita DESC
 ),
 UltimaAtividadePorTecnico AS (
