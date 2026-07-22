@@ -1016,16 +1016,30 @@ def tela_cadastros(request: Request):
     if request.session.get("tipo") != "coordenador":
         raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
 
+    # Cronômetros temporários (2026-07) só pra investigar a lentidão dessa
+    # tela em produção — remover depois que o gargalo for identificado.
+    import time as _time
+    _t0 = _time.time()
+
     # Traz pra tabela 'supervisores' quem já tem login como tipo 'supervisor'
     # em usuarios_supervisores (não duplica quem já estava aqui).
     repositorio.sincronizar_supervisores_de_usuarios()
+    _t1 = _time.time()
+    print(f"[TIMING /coordenador/cadastros] sincronizar_supervisores_de_usuarios: {_t1 - _t0:.2f}s", flush=True)
 
     supervisores = repositorio.listar_supervisores_cadastrados()
+    _t2 = _time.time()
+    print(f"[TIMING /coordenador/cadastros] listar_supervisores_cadastrados: {_t2 - _t1:.2f}s", flush=True)
+
     vinculos_agrupados = repositorio_vinculo_tecnico.listar_vinculos_de_todos_os_supervisores()
+    _t3 = _time.time()
+    print(f"[TIMING /coordenador/cadastros] listar_vinculos_de_todos_os_supervisores: {_t3 - _t2:.2f}s", flush=True)
+
     vinculos_por_supervisor = {
         s["id"]: vinculos_agrupados.get(s["nome"], [])
         for s in supervisores
     }
+    print(f"[TIMING /coordenador/cadastros] TOTAL ate aqui: {_t3 - _t0:.2f}s", flush=True)
     return templates.TemplateResponse(
         "cadastros_coordenador.html",
         {
