@@ -1021,8 +1021,9 @@ def tela_cadastros(request: Request):
     repositorio.sincronizar_supervisores_de_usuarios()
 
     supervisores = repositorio.listar_supervisores_cadastrados()
+    vinculos_agrupados = repositorio_vinculo_tecnico.listar_vinculos_de_todos_os_supervisores()
     vinculos_por_supervisor = {
-        s["id"]: repositorio_vinculo_tecnico.listar_vinculos_do_supervisor(s["nome"])
+        s["id"]: vinculos_agrupados.get(s["nome"], [])
         for s in supervisores
     }
     return templates.TemplateResponse(

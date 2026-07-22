@@ -111,6 +111,54 @@ def listar_vinculos_do_supervisor(supervisor: str):
     return [dict(l) for l in linhas]
 
 
+def listar_vinculos_de_todos_os_supervisores():
+    """
+    MESMA coisa que listar_vinculos_do_supervisor, mas pra TODOS os
+    supervisores de uma vez só — usado nas telas que precisam mostrar
+    vários supervisores juntos (ex: /coordenador/cadastros). Evita rodar
+    a mesma consulta pesada (que varre toda a base de visitas) uma vez
+    por supervisor — antes eram N consultas completas, uma por
+    supervisor; agora é 1 consulta só, e o agrupamento por supervisor é
+    feito em Python.
+
+    Retorna um dict {supervisor: [vinculos...]}, na mesma ordem/formato
+    de linha que listar_vinculos_do_supervisor.
+    """
+    engine = get_engine()
+    query = f"""
+        SELECT
+            v.id AS vinculo_id, v.tecnico, v.cpf,
+            COALESCE(vis.projeto_consolidado, v.projeto, cad.projeto) AS projeto,
+            COALESCE(vis.atividade, v.atividade, cad.atividade) AS atividade,
+            v.empresa, v.cnpj_empresa, v.supervisor,
+            v.data_inicio, v.data_fim_prevista,
+            v.data_desvinculacao, v.motivo_desvinculacao,
+            vis.primeira_visita, vis.ultima_visita,
+            tm.id_tecnico_responsavel AS id_tecnico, tm.ativo AS tecnico_ativo,
+            tm.motivo_desativacao AS tecnico_motivo_desativacao, tm.data_desativacao AS tecnico_data_desativacao
+        FROM vinculo_tecnico v
+        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON lower(trim(regexp_replace(vis.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+        LEFT JOIN LATERAL (
+            SELECT ta.projeto, ta.atividade
+            FROM tecnicos t
+            JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
+            WHERE lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+            ORDER BY ta.ultima_visita DESC NULLS LAST
+            LIMIT 1
+        ) cad ON true
+        LEFT JOIN tecnicos tm ON lower(trim(regexp_replace(tm.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+        ORDER BY v.supervisor, (v.data_desvinculacao IS NULL) DESC, v.tecnico, v.data_inicio DESC;
+    """
+    with engine.connect() as conn:
+        linhas = conn.execute(text(query)).mappings().all()
+
+    agrupado: dict[str, list[dict]] = {}
+    for l in linhas:
+        d = dict(l)
+        agrupado.setdefault(d["supervisor"], []).append(d)
+    return agrupado
+
+
 def listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor: str, mes_limite):
     """
     Técnicos que hoje são NATURALMENTE deste supervisor (pelo supervisor_atual
