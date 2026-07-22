@@ -1470,6 +1470,32 @@ def listar_projetos_do_supervisor(nome_supervisor: str):
     return [r.projeto for r in linhas]
 
 
+def listar_projetos_de_todos_os_supervisores():
+    """
+    MESMA coisa que listar_projetos_do_supervisor, mas pra TODOS os
+    supervisores de uma vez (1 consulta em vez de N) — usado nas telas
+    que precisam mostrar vários supervisores juntos (ex: /coordenador/cadastros).
+    Retorna um dict {supervisor: [projetos...]}.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT DISTINCT v.supervisor, ta.projeto
+                FROM vinculo_tecnico v
+                JOIN tecnicos t ON lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+                JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
+                WHERE v.data_desvinculacao IS NULL
+                  AND ta.projeto IS NOT NULL
+                ORDER BY v.supervisor, ta.projeto;
+            """)
+        ).fetchall()
+    agrupado: dict[str, list[str]] = {}
+    for r in linhas:
+        agrupado.setdefault(r.supervisor, []).append(r.projeto)
+    return agrupado
+
+
 def contar_tecnicos_vinculados(nome_supervisor: str) -> int:
     """Quantos técnicos estão HOJE vinculados (ativos) a esse supervisor.
     Usado pra decidir se dá pra excluir o cadastro dele ou não."""
@@ -1484,6 +1510,25 @@ def contar_tecnicos_vinculados(nome_supervisor: str) -> int:
             {"supervisor": nome_supervisor},
         ).scalar()
     return total or 0
+
+
+def contar_tecnicos_vinculados_por_supervisor():
+    """
+    MESMA coisa que contar_tecnicos_vinculados, mas pra TODOS os
+    supervisores de uma vez (1 consulta em vez de N). Retorna um dict
+    {supervisor: quantidade}.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT supervisor, COUNT(*) AS total
+                FROM vinculo_tecnico
+                WHERE data_desvinculacao IS NULL
+                GROUP BY supervisor;
+            """)
+        ).fetchall()
+    return {r.supervisor: r.total for r in linhas}
 
 
 def excluir_supervisor(supervisor_id: int, nome_supervisor: str):
