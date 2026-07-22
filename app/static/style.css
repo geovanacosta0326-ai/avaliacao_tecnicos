@@ -164,6 +164,35 @@ button:active, .botao:active { transform: translateY(0); }
 .status.pendente { background: var(--terracota-100); color: var(--terracota-600); }
 .status.avaliado { background: var(--verde-100); color: var(--verde-800); }
 
+/* ── Menu de Ações (dropdown) por técnico — texto, não botão ── */
+.menu-acoes-wrap { position: relative; display: inline-block; text-align: left; }
+.link-acoes {
+    background: none; border: none; box-shadow: none; margin: 0; padding: 4px 2px;
+    color: var(--verde-700); font-weight: 700; font-size: 0.85rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: 'Manrope', sans-serif; transform: none;
+}
+.link-acoes:hover { background: none; box-shadow: none; transform: none; color: var(--verde-800); text-decoration: underline; }
+.seta-menu-acoes { font-size: 0.7rem; transition: transform .12s ease; }
+.menu-acoes-wrap.aberto .seta-menu-acoes { transform: rotate(180deg); }
+.menu-acoes-dropdown {
+    display: none;
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+    background: #fff; border: 1px solid var(--borda); border-radius: 10px;
+    box-shadow: var(--sombra); min-width: 180px; padding: 6px 0; text-align: left;
+    white-space: normal;
+}
+.menu-acoes-wrap.aberto .menu-acoes-dropdown { display: block; }
+.menu-acoes-dropdown button {
+    display: block; width: 100%; text-align: left;
+    background: none; color: var(--texto-900); border: none;
+    box-shadow: none; margin: 0; padding: 10px 16px; border-radius: 0;
+    font-size: 0.85rem; font-weight: 500; transform: none; font-family: inherit;
+}
+.menu-acoes-dropdown button:hover { background: var(--verde-50); color: var(--verde-800); transform: none; box-shadow: none; }
+.menu-acoes-dropdown button.item-perigo { color: var(--terracota-600); }
+.menu-acoes-dropdown button.item-perigo:hover { background: var(--terracota-100); color: var(--terracota-600); }
+
 /* ── Detalhe de uma avaliação: lista de perguntas/respostas ── */
 .lista-perguntas { list-style: none; padding: 0; margin-top: 16px; }
 .lista-perguntas li {
@@ -265,6 +294,85 @@ button:active, .botao:active { transform: translateY(0); }
 .grade-detalhe div span {
     display: block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.03em; color: var(--texto-600); margin-bottom: 2px;
+}
+
+/* Formulários de cadastro (ex: dados do supervisor) — cartão com grade organizada */
+.cartao-formulario {
+    background: var(--verde-50);
+    border: 1px solid var(--borda);
+    border-radius: 14px;
+    padding: 20px 22px 22px;
+    margin-bottom: 20px;
+}
+.cartao-formulario h3 {
+    margin: 0 0 16px;
+    font-size: 0.88rem;
+    font-weight: 800;
+    color: var(--verde-900);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.grade-formulario {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 16px 20px;
+}
+.grade-formulario .campo {
+    display: flex;
+    flex-direction: column;
+}
+.grade-formulario .campo label {
+    margin: 0 0 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--texto-600);
+}
+.grade-formulario .campo input {
+    margin: 0;
+}
+.grade-formulario .campo-full {
+    grid-column: 1 / -1;
+}
+.acoes-formulario {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+/* Painel de detalhe do supervisor — equipe em tabela, dados cadastrais embaixo */
+.cartao-equipe {
+    background: #ffffff;
+    border: 1px solid var(--borda);
+    border-radius: 14px;
+    padding: 16px 18px;
+}
+.cartao-equipe h3 {
+    margin: 0 0 12px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--verde-900);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.tabela-equipe {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.tabela-equipe td {
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--borda);
+}
+.tabela-equipe tr:last-child td {
+    border-bottom: none;
+}
+.legenda-projetos {
+    margin: 12px 0 0;
+    font-size: 0.72rem;
+    color: var(--texto-600);
+    line-height: 1.4;
 }
 .tabela-comparativa { width: 100%; border-collapse: collapse; font-size: 0.88rem; min-width: 480px; }
 .tabela-comparativa thead th {

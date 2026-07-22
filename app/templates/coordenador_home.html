@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Coordenador</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Olá, {{ supervisor }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <p class="subtitulo">Escolha o que você quer ver ou fazer.</p>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 24px;">
+            <a href="/coordenador/cadastros" class="cartao-mes">
+                <span class="cartao-mes-label">👥 Supervisores</span>
+            </a>
+            <a href="/coordenador/vinculos-tecnicos" class="cartao-mes">
+                <span class="cartao-mes-label">🌱 Técnicos</span>
+            </a>
+            <a href="/coordenador/avaliacao" class="cartao-mes">
+                <span class="cartao-mes-label">📋 Avaliação</span>
+            </a>
+            <a href="/coordenador/ranking" class="cartao-mes">
+                <span class="cartao-mes-label">🏆 Ranking</span>
+            </a>
+            <a href="/coordenador/tecnicos/relatorio" class="cartao-mes">
+                <span class="cartao-mes-label">🖨️ Relatório de técnicos</span>
+            </a>
+        </div>
+    </div>
+</body>
+</html>

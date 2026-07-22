@@ -30,6 +30,23 @@
             }
             .lista-perguntas-pergunta { font-size: 0.74rem; line-height: 1.25; }
             .lista-perguntas-resposta { font-size: 0.8rem; }
+
+            /* Cards de indicadores: compactos na impressão, sem gerar página extra */
+            .grade-kpi {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 6px;
+                margin-bottom: 10px !important;
+                page-break-inside: avoid;
+            }
+            .card-kpi {
+                padding: 6px 8px;
+                border-radius: 6px;
+            }
+            .card-kpi-label { font-size: 0.62rem; }
+            .card-kpi-valor { font-size: 1rem; }
+            .card-kpi-sub { font-size: 0.6rem; margin-top: 2px; }
+            .barra-progresso { display: none; }
         }
     </style>
 </head>
@@ -50,6 +67,58 @@
             Nota final:
             <strong style="color:#1e3a5f;">{{ avaliacao.nota_final }}</strong>
         </p>
+
+        {% if resumo_visitas %}
+        <div class="grade-kpi" style="margin-bottom: 18px;">
+            <div class="card-kpi verde">
+                <div class="card-kpi-label">Visitas em {{ mes_referencia }}</div>
+                <div class="card-kpi-valor">{{ resumo_visitas.total_visitas }}</div>
+                <div class="card-kpi-sub">
+                    {{ resumo_visitas.total_visitas_validas }} válidas · {{ resumo_visitas.visitas_invalidas }} inválidas
+                    {% if resumo_visitas.pct_visitas_validas is not none %}
+                        · {{ resumo_visitas.pct_visitas_validas }}% válidas
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-kpi dourado">
+                <div class="card-kpi-label">Orientações em {{ mes_referencia }}</div>
+                <div class="card-kpi-valor">{{ resumo_visitas.ori_total_geral | int }}</div>
+                <div class="card-kpi-sub">
+                    {{ resumo_visitas.ori_concluida | int }} concluídas
+                    {% if resumo_visitas.pct_ori_concluida is not none %}
+                        · {{ resumo_visitas.pct_ori_concluida }}% concluídas
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-kpi terracota">
+                <div class="card-kpi-label">Propriedades atendidas</div>
+                <div class="card-kpi-valor">{{ resumo_visitas.total_propriedades }}</div>
+                <div class="card-kpi-sub">
+                    {{ resumo_visitas.propriedades_ativas }} ativas · {{ resumo_visitas.propriedades_inativas }} inativas
+                    {% if resumo_visitas.pct_propriedades_ativas is not none %}
+                        · {{ resumo_visitas.pct_propriedades_ativas }}% ativas
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-kpi verde">
+                <div class="card-kpi-label">Propriedades sem sobreposição de projeto</div>
+                <div class="card-kpi-valor">
+                    {% if resumo_visitas.pct_propriedades_sem_sobreposicao is not none %}
+                        {{ resumo_visitas.pct_propriedades_sem_sobreposicao }}%
+                    {% else %}
+                        —
+                    {% endif %}
+                </div>
+                <div class="card-kpi-sub">Propriedades não repetidas em mais de um projeto ao mesmo tempo</div>
+            </div>
+        </div>
+
+        <p class="subtitulo">
+            Primeira visita: {{ resumo_visitas.primeira_visita.strftime("%d/%m/%Y") if resumo_visitas.primeira_visita else "—" }}
+            &nbsp;·&nbsp;
+            Última visita: {{ resumo_visitas.ultima_visita.strftime("%d/%m/%Y") if resumo_visitas.ultima_visita else "—" }}
+        </p>
+        {% endif %}
 
         {% for bloco in blocos %}
         <h2>{{ bloco.titulo }}</h2>

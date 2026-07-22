@@ -47,8 +47,8 @@
                     &nbsp;{{ t.tecnico }}
                 </span>
                 <span style="display:flex; align-items:center; gap:10px;">
-                    <a href="/comparar/{{ t.tecnico }}?sup={{ supervisor }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">📈 Evolução</a>
                     {% if t.avaliado %}
+                        <a href="/comparar/{{ t.tecnico }}?sup={{ supervisor }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">📈 Evolução</a>
                         <a class="status avaliado" style="text-decoration:none;" href="/minhas-avaliacoes/{{ t.avaliacao_id }}">
                             ✔ Avaliado{% if t.nota_final is not none %} ({{ t.nota_final }}){% endif %}
                         </a>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Técnicos desvinculados</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Olá, {{ supervisor }}</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/">Técnicos da equipe</a>
+            <a href="/tecnicos-desvinculados" class="aba-ativa">Técnicos desvinculados ({{ desvinculados|length }})</a>
+            <a href="/avaliacoes">Avaliação dos técnicos</a>
+        </nav>
+
+        <h2>Técnicos desvinculados</h2>
+        <p class="subtitulo">Só para consulta — data e motivo de cada desvínculo.</p>
+        {% if not desvinculados %}
+        <p class="subtitulo">Nenhum técnico desvinculado até agora.</p>
+        {% else %}
+        <ul class="historico-vinculo">
+            {% for v in desvinculados %}
+            <li class="encerrado">
+                <strong>{{ v.tecnico }}</strong>
+                <br>
+                <small style="color: var(--texto-600); font-weight: 400;">
+                    Data do desvínculo: {{ v.data_desvinculacao.strftime("%d/%m/%Y") }}
+                </small>
+                <span class="motivo">Motivo: {{ v.motivo_desvinculacao or "—" }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</body>
+</html>

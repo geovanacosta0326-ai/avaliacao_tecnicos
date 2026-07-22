@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Relatório de técnicos</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <style>
+        .status.desativado-forte { background: var(--terracota-600); color: #fff; }
+        .status.neutro { background: var(--areia-100); color: var(--texto-600); }
+
+        table.relatorio { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 16px; }
+        table.relatorio th, table.relatorio td {
+            text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--borda);
+            vertical-align: top;
+        }
+        table.relatorio th {
+            background: var(--verde-700); color: #fff; font-weight: 600;
+            position: sticky; top: 0;
+        }
+        table.relatorio tr:nth-child(even) { background: var(--areia-50); }
+
+        @media print {
+            .nao-imprime { display: none !important; }
+            body { background: #fff; }
+            .container { max-width: none; box-shadow: none; padding: 0; }
+            table.relatorio th { background: #e3e3e3 !important; color: #000 !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container" style="max-width: 1200px;">
+        <div class="top-bar nao-imprime">
+            <h1>Relatório de técnicos</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas nao-imprime">
+            <a href="/coordenador">Início</a>
+            <a href="/coordenador/vinculos-tecnicos">Técnicos</a>
+            <a href="/coordenador/tecnicos-desativados">Desativados/Descredenciados</a>
+            <a href="/coordenador/cadastros">Supervisores</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+
+        <div class="nao-imprime" style="display:flex; gap:14px; align-items:flex-end; margin: 16px 0; flex-wrap: wrap;">
+            <form method="get" action="/coordenador/tecnicos/relatorio" style="margin:0;">
+                <label for="select-supervisor" style="display:block; font-size:0.8rem; color:var(--texto-600);">Supervisor</label>
+                <select id="select-supervisor" name="supervisor" onchange="this.form.submit()" style="min-width:220px;">
+                    <option value="">Todos os supervisores</option>
+                    {% for s in supervisores %}
+                    <option value="{{ s.nome }}" {{ 'selected' if s.nome == supervisor_escolhido else '' }}>{{ s.nome }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            <div style="flex:1; min-width:220px; max-width:320px;">
+                <label for="filtro-relatorio" style="display:block; font-size:0.8rem; color:var(--texto-600);">Buscar</label>
+                <input type="text" id="filtro-relatorio" placeholder="Buscar técnico…" style="width:100%;">
+            </div>
+            <span id="contador-relatorio" style="color:var(--texto-600); font-size:0.85rem; padding-bottom:8px;"></span>
+            <button type="button" class="botao" onclick="window.print()">🖨️ Imprimir</button>
+            <a class="botao botao-dourado" href="/coordenador/tecnicos/relatorio.xlsx{{ ('?supervisor=' ~ supervisor_escolhido) if supervisor_escolhido else '' }}">⬇️ Baixar Excel</a>
+        </div>
+
+        <h2 style="margin-bottom:4px;">
+            {% if supervisor_escolhido %}Técnicos de {{ supervisor_escolhido }}{% else %}Todos os técnicos{% endif %}
+            ({{ tecnicos|length }})
+        </h2>
+        <p class="subtitulo">Situação atual, capacitação metodológica e avaliação registrada na desativação. Dados cadastrais completos (RG, CPF, contato, endereço etc.) saem no Excel.</p>
+
+        {% if not tecnicos %}
+        <p class="subtitulo">Nenhum técnico encontrado.</p>
+        {% else %}
+        <table class="relatorio" id="tabela-relatorio">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Situação</th>
+                    <th>Capacitação</th>
+                    <th>Modalidade</th>
+                    <th>Avaliação</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in tecnicos %}
+                <tr data-nome="{{ t.nome | lower }}">
+                    <td>
+                        <strong>{{ t.nome }}</strong>
+                        {% if t.projeto_atual or t.atividade_atual %}
+                        <br><small style="color:var(--texto-600);">{{ t.projeto_atual or "—" }} · {{ t.atividade_atual or "—" }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not t.ativo %}
+                        <span class="status desativado-forte">Desativado</span>
+                        {% elif t.supervisor_atual %}
+                        <span class="status avaliado">{{ t.situacao }}</span>
+                        {% elif t.ja_teve_vinculo %}
+                        <span class="status pendente">{{ t.situacao }}</span>
+                        {% else %}
+                        <span class="status neutro">{{ t.situacao }}</span>
+                        {% endif %}
+                        {% if not t.ativo and t.motivo_desativacao_curto %}
+                        <br><small style="color:var(--texto-600);">
+                            {{ t.data_desativacao.strftime("%d/%m/%Y") if t.data_desativacao else "—" }}
+                            · {{ t.motivo_desativacao_curto }}
+                        </small>
+                        {% endif %}
+                    </td>
+                    <td>{{ t.mes_ano_capacitacao_metodologica.strftime("%m/%Y") if t.mes_ano_capacitacao_metodologica else "—" }}</td>
+                    <td>{{ t.modalidade_capacitacao_metodologica or "—" }}</td>
+                    <td>{{ t.avaliacao_desativacao or "—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+
+    <script>
+        const inputFiltro = document.getElementById('filtro-relatorio');
+        const contador = document.getElementById('contador-relatorio');
+        if (inputFiltro) {
+            const linhas = Array.from(document.querySelectorAll('#tabela-relatorio tbody tr'));
+
+            function aplicarFiltro() {
+                const busca = inputFiltro.value.trim().toLowerCase();
+                let visiveis = 0;
+                linhas.forEach(function (tr) {
+                    const mostra = !busca || tr.dataset.nome.includes(busca);
+                    tr.style.display = mostra ? '' : 'none';
+                    if (mostra) visiveis++;
+                });
+                contador.textContent = busca ? (visiveis + ' de ' + linhas.length + ' técnico(s)') : '';
+            }
+
+            inputFiltro.addEventListener('input', aplicarFiltro);
+            aplicarFiltro();
+        }
+    </script>
+</body>
+</html>

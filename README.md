@@ -43,12 +43,12 @@ uvicorn app.main:app --reload
 ```
 
 
-Acesse http://localhost:8000/login
+                                                                                                     
 
-uvicorn app.main:app --port 8001 --reload
+uvicorn app.main:app --port 8088 --reload
 uvicorn app.main:app --port 8000 --reload
 
-http://localhost:8000/login
+http://localhost:8086/login
 ## Estrutura
 
 ```

@@ -12,6 +12,7 @@ from datetime import date
 
 # Motivos padronizados de desvínculo (o formulário usa estes + "Outro").
 MOTIVOS_DESVINCULACAO = [
+    "Mudança de supervisor",
     "Encerramento do projeto",
     "Fim de contrato",
     "Substituição do técnico",
@@ -30,18 +31,18 @@ QUERY_TODOS_TECNICOS_COM_VISITAS = """
 WITH visitas AS (
     SELECT
         tecnico_responsavel AS tecnico,
-        dt_visita_v,
+        dt_visita_v::date AS dt_visita_v,
         projeto,
         FIRST_VALUE(projeto) OVER (
-            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
+            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v::date DESC
         ) AS projeto_atual,
         FIRST_VALUE(atividade) OVER (
-            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
+            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v::date DESC
         ) AS atividade_atual,
         FIRST_VALUE(supervisor_atual) OVER (
-            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
+            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v::date DESC
         ) AS supervisor_mais_recente,
-        MAX(dt_visita_v) OVER (PARTITION BY tecnico_responsavel) AS ultima_visita
+        MAX(dt_visita_v::date) OVER (PARTITION BY tecnico_responsavel) AS ultima_visita
     FROM public.acompanhamento_mensal_visitas
     WHERE tecnico_responsavel IS NOT NULL
 )
@@ -71,19 +72,37 @@ def listar_vinculos_do_supervisor(supervisor: str):
     TODOS os vínculos deste supervisor — ativos e encerrados — com
     primeira/última visita. A tela "Gestão de Técnicos" separa ativos de
     históricos a partir do campo data_desvinculacao.
+
+    Projeto/atividade: prioriza o que vem da base de visitas (mais
+    atual); se o técnico ainda não tem visita registrada lá, cai pro
+    que foi digitado na hora de criar o vínculo; se também não tiver,
+    cai pro cadastro mestre do técnico (tecnico_atividades) — é o que
+    alimenta a lista de "Projetos" do supervisor, então mantém os dois
+    lugares consistentes.
     """
     engine = get_engine()
     query = f"""
         SELECT
             v.id AS vinculo_id, v.tecnico, v.cpf,
-            COALESCE(vis.projeto_consolidado, v.projeto) AS projeto,
-            COALESCE(vis.atividade, v.atividade) AS atividade,
+            COALESCE(vis.projeto_consolidado, v.projeto, cad.projeto) AS projeto,
+            COALESCE(vis.atividade, v.atividade, cad.atividade) AS atividade,
             v.empresa, v.cnpj_empresa, v.supervisor,
             v.data_inicio, v.data_fim_prevista,
             v.data_desvinculacao, v.motivo_desvinculacao,
-            vis.primeira_visita, vis.ultima_visita
+            vis.primeira_visita, vis.ultima_visita,
+            tm.id_tecnico_responsavel AS id_tecnico, tm.ativo AS tecnico_ativo,
+            tm.motivo_desativacao AS tecnico_motivo_desativacao, tm.data_desativacao AS tecnico_data_desativacao
         FROM vinculo_tecnico v
-        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON vis.tecnico = v.tecnico
+        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON lower(trim(regexp_replace(vis.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+        LEFT JOIN LATERAL (
+            SELECT ta.projeto, ta.atividade
+            FROM tecnicos t
+            JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
+            WHERE lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+            ORDER BY ta.ultima_visita DESC NULLS LAST
+            LIMIT 1
+        ) cad ON true
+        LEFT JOIN tecnicos tm ON lower(trim(regexp_replace(tm.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
         WHERE v.supervisor = :supervisor
         ORDER BY (v.data_desvinculacao IS NULL) DESC, v.tecnico, v.data_inicio DESC;
     """
@@ -156,18 +175,18 @@ def obter_visita_tecnico(tecnico: str):
                 WITH visitas AS (
                     SELECT
                         tecnico_responsavel AS tecnico,
-                        dt_visita_v,
+                        dt_visita_v::date AS dt_visita_v,
                         projeto,
                         FIRST_VALUE(projeto) OVER (
-                            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
+                            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v::date DESC
                         ) AS projeto_atual,
                         FIRST_VALUE(atividade) OVER (
-                            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
+                            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v::date DESC
                         ) AS atividade_atual,
                         FIRST_VALUE(supervisor_atual) OVER (
-                            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v DESC
+                            PARTITION BY tecnico_responsavel ORDER BY dt_visita_v::date DESC
                         ) AS supervisor_mais_recente,
-                        MAX(dt_visita_v) OVER (PARTITION BY tecnico_responsavel) AS ultima_visita
+                        MAX(dt_visita_v::date) OVER (PARTITION BY tecnico_responsavel) AS ultima_visita
                     FROM public.acompanhamento_mensal_visitas
                     WHERE tecnico_responsavel = :tecnico
                 )
@@ -215,6 +234,25 @@ def obter_vinculo_ativo_do_tecnico(tecnico: str):
     return None
 
 
+def reverter_desvinculacao(vinculo_id: int):
+    """
+    Desfaz um descredenciamento: limpa data/motivo, voltando o vínculo a
+    ativo. Se o técnico já tiver outro vínculo ativo (ex: foi transferido
+    depois), o índice único uq_vinculo_tecnico_ativo barra a operação —
+    o chamador deve tratar essa exceção.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE vinculo_tecnico
+                SET data_desvinculacao = NULL, motivo_desvinculacao = NULL
+                WHERE id = :id;
+            """),
+            {"id": vinculo_id},
+        )
+
+
 def obter_vinculo(vinculo_id: int):
     """Um vínculo específico (usado para pré-preencher o formulário de edição)."""
     engine = get_engine()
@@ -245,18 +283,67 @@ def listar_todos_vinculos_ativos():
     query = f"""
         SELECT
             v.id AS vinculo_id, v.tecnico, v.cpf,
-            COALESCE(vis.projeto_consolidado, v.projeto) AS projeto,
-            COALESCE(vis.atividade, v.atividade) AS atividade,
+            COALESCE(vis.projeto_consolidado, v.projeto, cad.projeto) AS projeto,
+            COALESCE(vis.atividade, v.atividade, cad.atividade) AS atividade,
             v.empresa, v.cnpj_empresa, v.supervisor,
             v.data_inicio, v.data_fim_prevista,
             vis.primeira_visita, vis.ultima_visita
         FROM vinculo_tecnico v
-        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON vis.tecnico = v.tecnico
+        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON lower(trim(regexp_replace(vis.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+        LEFT JOIN LATERAL (
+            SELECT ta.projeto, ta.atividade
+            FROM tecnicos t
+            JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
+            WHERE lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+            ORDER BY ta.ultima_visita DESC NULLS LAST
+            LIMIT 1
+        ) cad ON true
         WHERE v.data_desvinculacao IS NULL
         ORDER BY v.supervisor, v.tecnico;
     """
     with engine.connect() as conn:
         linhas = conn.execute(text(query)).mappings().all()
+    return [dict(l) for l in linhas]
+
+
+def listar_historico_desvinculacoes():
+    """
+    Auditoria do coordenador: TODO desvínculo já registrado no sistema,
+    de todos os técnicos — inclusive quem foi desvinculado e no mesmo dia
+    (ou depois) ganhou um vínculo novo com outro supervisor (transferência,
+    motivo "Mudança de supervisor"). Isso é diferente de
+    listar_tecnicos_descredenciados(), que só traz quem está SEM
+    supervisor agora — aqui aparece o evento em si, tenha ele resultado
+    em técnico solto ou em transferência.
+    Traz junto (quando existir) o supervisor atual do técnico, pra deixar
+    claro que ele não ficou sem vínculo, só trocou.
+
+    NÃO entra aqui o vínculo que foi encerrado automaticamente porque o
+    técnico foi DESATIVADO (motivo começando com "Técnico desativado") —
+    esse evento já aparece na lista de "Desativados"; repetir aqui só
+    duplicava a mesma informação e confundia o coordenador.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT
+                    v.tecnico,
+                    v.supervisor AS supervisor_anterior,
+                    v.data_inicio,
+                    v.data_desvinculacao,
+                    v.motivo_desvinculacao,
+                    atual.supervisor AS supervisor_atual
+                FROM vinculo_tecnico v
+                LEFT JOIN vinculo_tecnico atual
+                    ON atual.tecnico = v.tecnico
+                   AND atual.data_desvinculacao IS NULL
+                WHERE v.data_desvinculacao IS NOT NULL
+                  AND (v.motivo_desvinculacao IS NULL
+                       OR v.motivo_desvinculacao NOT LIKE 'Técnico desativado%')
+                ORDER BY v.data_desvinculacao DESC, v.tecnico;
+            """)
+        ).mappings().all()
     return [dict(l) for l in linhas]
 
 
@@ -276,7 +363,7 @@ def auto_desvincular_tecnicos_inativos(supervisor: str, mes_limite) -> int:
     query = f"""
         SELECT v.id AS vinculo_id, v.tecnico
         FROM vinculo_tecnico v
-        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON vis.tecnico = v.tecnico
+        LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON lower(trim(regexp_replace(vis.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
         WHERE v.supervisor = :supervisor
           AND v.data_desvinculacao IS NULL
           AND (vis.ultima_visita IS NULL OR vis.ultima_visita < :mes_limite);
@@ -471,6 +558,30 @@ def editar_vinculo(
                 "atividade": atividade or None,
                 "empresa": empresa or None,
                 "cnpj_empresa": cnpj_empresa or None,
+                "data_inicio": data_inicio or None,
+                "data_fim_prevista": data_fim_prevista or None,
+            },
+        )
+
+
+def editar_datas_vinculo(vinculo_id: int, data_inicio=None, data_fim_prevista=None):
+    """
+    Atualiza SÓ o início e o fim previsto do vínculo ativo — não mexe em
+    projeto/atividade/empresa/CNPJ/CPF (esses vêm da base de visitas ou
+    do cadastro mestre do técnico, não fazem sentido editar por aqui).
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE vinculo_tecnico
+                SET data_inicio = COALESCE(:data_inicio, data_inicio),
+                    data_fim_prevista = :data_fim_prevista,
+                    atualizado_em = NOW()
+                WHERE id = :id
+            """),
+            {
+                "id": vinculo_id,
                 "data_inicio": data_inicio or None,
                 "data_fim_prevista": data_fim_prevista or None,
             },

@@ -5,3 +5,10 @@ __pycache__/
 venv/
 .DS_Store
 *.log
+
+# Nunca versionar: contém login/senha de supervisores em texto puro.
+tabela_supervisores.txt
+
+# Dados pessoais de técnicos (CPF, RG, contato etc.) — não devem ir pro GitHub.
+Cadastro dos Técnicos.xlsx
+backup_avaliacoes_*/

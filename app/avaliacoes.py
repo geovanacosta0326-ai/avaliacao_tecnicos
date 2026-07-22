@@ -50,15 +50,15 @@ PERGUNTAS = [
 ]
 
 
-def classificar(nota_final: int) -> str:
-    """Classificação conforme a faixa da nota final (soma das 10 perguntas, 50-100)."""
-    if nota_final >= 90:
+def classificar(nota_final) -> str:
+    """Classificação conforme a faixa da nota final (média das 10 perguntas, 5.0-10.0)."""
+    if nota_final >= 9:
         return "Desempenho Excelente"
-    if nota_final >= 80:
+    if nota_final >= 8:
         return "Muito Bom"
-    if nota_final >= 70:
+    if nota_final >= 7:
         return "Bom"
-    if nota_final >= 60:
+    if nota_final >= 6:
         return "Regular"
     return "Necessita Melhoria"
 
@@ -136,9 +136,11 @@ def montar_tabela_comparativa(lista_avaliacoes: list[dict]):
     return meses, linhas, media_valores
 
 
-def calcular_nota_final(respostas: dict) -> int:
-    """Soma as 10 notas (cada uma de 5 a 10) — mínimo 50, máximo 100."""
-    return sum(int(respostas[c]) for c in CAMPOS_NOTA)
+def calcular_nota_final(respostas: dict) -> float:
+    """Média das 10 notas (cada uma de 5 a 10): soma dividida por 10 —
+    resultado fica sempre entre 5.0 e 10.0."""
+    soma = sum(int(respostas[c]) for c in CAMPOS_NOTA)
+    return round(soma / len(CAMPOS_NOTA), 2)
 
 
 def ja_avaliado(supervisor: str, tecnico: str, mes_referencia) -> bool:

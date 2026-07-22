@@ -11,6 +11,23 @@
             <h1>{{ tecnico }}</h1>
             <a href="/logout">Sair</a>
         </div>
+
+        {% if eh_coordenador %}
+        <nav class="abas">
+            <a href="/coordenador">Início</a>
+            <a href="/coordenador/vinculos-tecnicos">Técnicos</a>
+            <a href="/coordenador/tecnicos-desativados">Desativados/Descredenciados</a>
+            <a href="/coordenador/cadastros">Supervisores</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+        {% else %}
+        <nav class="abas">
+            <a href="/">Técnicos da equipe</a>
+            <a href="/tecnicos-desvinculados">Técnicos desvinculados</a>
+            <a href="/avaliacoes">Avaliação dos técnicos</a>
+        </nav>
+        {% endif %}
+
         <p class="subtitulo">
             <a href="#" onclick="history.back(); return false;">← Voltar</a>
         </p>
@@ -20,18 +37,33 @@
             · última visita: {{ visita.ultima_visita.strftime("%d/%m/%Y") if visita.ultima_visita else "—" }}
         </p>
 
+        <h2>Dados cadastrais</h2>
+        {% if tecnico_cadastro %}
+        <table style="width:100%; font-size:0.92rem; margin-bottom:18px;">
+            <tr><td style="color:var(--texto-600); padding:6px 0; width:40%;">RG</td><td>{{ tecnico_cadastro.rg or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">CPF</td><td>{{ tecnico_cadastro.cpf or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">Contato</td><td>{{ tecnico_cadastro.contato or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">E-mail</td><td>{{ tecnico_cadastro.email or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">Endereço</td><td>{{ tecnico_cadastro.endereco or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">Município</td><td>{{ tecnico_cadastro.municipio or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">Empresa</td><td>{{ tecnico_cadastro.empresa or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">CNPJ da empresa</td><td>{{ tecnico_cadastro.cnpj_empresa or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">Capacitação metodológica</td><td>{{ tecnico_cadastro.mes_ano_capacitacao_metodologica.strftime("%m/%Y") if tecnico_cadastro.mes_ano_capacitacao_metodologica else "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0;">Modalidade da capacitação</td><td>{{ tecnico_cadastro.modalidade_capacitacao_metodologica or "—" }}</td></tr>
+        </table>
+        {% if eh_meu or eh_coordenador %}
+        <button type="button" class="botao" style="margin-bottom:18px;" onclick="document.getElementById('modal-editar-cadastro').showModal()">Editar cadastro</button>
+        {% endif %}
+        {% else %}
+        <p class="subtitulo">Este técnico ainda não tem registro na tabela de cadastro mestre.</p>
+        {% endif %}
+
         {% if vinculo_ativo and (eh_meu or eh_coordenador) %}
         <!-- Vínculo ativo, é da MINHA equipe (ou eu sou coordenador): mostra os dados e as ações -->
         <h2>Vínculo atual</h2>
-        {% if not eh_meu %}
-        <p class="subtitulo" style="margin-top:-8px;">Vinculado à equipe de <strong>{{ vinculo_ativo.supervisor }}</strong>.</p>
-        {% endif %}
         <table style="width:100%; font-size:0.92rem; margin-bottom:18px;">
-            <tr><td style="color:var(--texto-600); padding:6px 0; width:40%;">CPF</td><td>{{ vinculo_ativo.cpf or "—" }}</td></tr>
-            <tr><td style="color:var(--texto-600); padding:6px 0;">Projeto</td><td>{{ visita.projeto_consolidado or vinculo_ativo.projeto or "—" }}</td></tr>
+            <tr><td style="color:var(--texto-600); padding:6px 0; width:40%;">Projeto</td><td>{{ visita.projeto_consolidado or vinculo_ativo.projeto or "—" }}</td></tr>
             <tr><td style="color:var(--texto-600); padding:6px 0;">Atividade</td><td>{{ visita.atividade or vinculo_ativo.atividade or "—" }}</td></tr>
-            <tr><td style="color:var(--texto-600); padding:6px 0;">Empresa</td><td>{{ vinculo_ativo.empresa or "—" }}</td></tr>
-            <tr><td style="color:var(--texto-600); padding:6px 0;">CNPJ</td><td>{{ vinculo_ativo.cnpj_empresa or "—" }}</td></tr>
             <tr><td style="color:var(--texto-600); padding:6px 0;">Início do vínculo</td><td>{{ vinculo_ativo.data_inicio.strftime("%d/%m/%Y") }}</td></tr>
             <tr><td style="color:var(--texto-600); padding:6px 0;">Fim previsto</td><td>{{ vinculo_ativo.data_fim_prevista.strftime("%d/%m/%Y") if vinculo_ativo.data_fim_prevista else "—" }}</td></tr>
             <tr><td style="color:var(--texto-600); padding:6px 0;">Situação</td><td><span class="status avaliado">Ativo</span></td></tr>
@@ -41,12 +73,13 @@
             {% if eh_meu %}
             <a class="botao botao-dourado" href="/avaliar/{{ tecnico }}">Avaliar técnico</a>
             {% endif %}
-            <button type="button" class="botao" onclick="document.getElementById('modal-editar').showModal()">Editar vínculo</button>
+            <button type="button" class="botao" onclick="document.getElementById('modal-editar-vinculo').showModal()">Editar vínculo</button>
             {% if eh_coordenador %}
-            <button type="button" class="botao" onclick="document.getElementById('modal-mudar-supervisor').showModal()">Mudar de supervisor</button>
+            <button type="button" class="botao" onclick="document.getElementById('modal-mudar-supervisor').showModal()">Desvincular Técnico</button>
+            <button type="button" class="botao" onclick="document.getElementById('modal-desativar-tecnico').showModal()">Desativar Técnico</button>
             {% endif %}
-            <button type="button" class="botao" onclick="document.getElementById('modal-desvincular').showModal()">Desvincular técnico</button>
         </div>
+
 
         {% elif vinculo_ativo and not eh_meu and not eh_coordenador %}
         <!-- Vínculo ativo, mas com OUTRO supervisor: só leitura, sem ações -->
@@ -61,7 +94,8 @@
         </table>
 
         {% else %}
-        <!-- Sem vínculo ativo nenhum: formulário de complementar cadastro -->
+        <!-- Sem vínculo ativo nenhum -->
+        {% if eh_coordenador %}
         <h2>Complementar cadastro</h2>
         <p class="subtitulo">
             Este técnico ainda não tem vínculo ativo. Projeto e atividade abaixo vieram sugeridos
@@ -70,7 +104,6 @@
         <form method="post" action="/tecnicos/criar">
             <input type="hidden" name="tecnico" value="{{ tecnico }}">
 
-            {% if eh_coordenador %}
             <label>Vincular ao supervisor</label>
             <select name="supervisor_escolhido" required>
                 <option value="">Escolha o supervisor…</option>
@@ -78,7 +111,6 @@
                 <option value="{{ s }}">{{ s }}</option>
                 {% endfor %}
             </select>
-            {% endif %}
 
             <label>CPF</label>
             <input type="text" name="cpf" placeholder="000.000.000-00">
@@ -103,6 +135,11 @@
 
             <button type="submit" class="botao botao-dourado" style="margin-top:14px;">Vincular</button>
         </form>
+        {% else %}
+        <div class="aviso">
+            Este técnico ainda não tem vínculo ativo com nenhum supervisor.
+        </div>
+        {% endif %}
         {% endif %}
 
         {% if historico %}
@@ -119,53 +156,91 @@
         {% endif %}
     </div>
 
+    {% if tecnico_cadastro and (eh_meu or eh_coordenador) %}
+    <!-- Modal: editar dados cadastrais do técnico (tabela mestra 'tecnicos') -->
+    <dialog id="modal-editar-cadastro" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" action="/tecnicos/{{ tecnico }}/cadastro/editar" style="padding: 24px 28px; min-width: 320px; max-width: 400px;">
+            <h2 style="margin-top:0;">Editar cadastro</h2>
+            <input type="hidden" name="id_tecnico" value="{{ tecnico_cadastro.id_tecnico_responsavel }}">
+
+            <label>RG</label>
+            <input type="text" name="rg" value="{{ tecnico_cadastro.rg or '' }}">
+
+            <label>CPF</label>
+            <input type="text" name="cpf" value="{{ tecnico_cadastro.cpf or '' }}" placeholder="000.000.000-00">
+
+            <label>Contato</label>
+            <input type="text" name="contato" value="{{ tecnico_cadastro.contato or '' }}" placeholder="(00) 00000-0000">
+
+            <label>E-mail</label>
+            <input type="email" name="email" value="{{ tecnico_cadastro.email or '' }}">
+
+            <label>Endereço</label>
+            <input type="text" name="endereco" value="{{ tecnico_cadastro.endereco or '' }}">
+
+            <label>Município</label>
+            <input type="text" name="municipio" value="{{ tecnico_cadastro.municipio or '' }}">
+
+            <label>Empresa</label>
+            <input type="text" name="empresa" value="{{ tecnico_cadastro.empresa or '' }}">
+
+            <label>CNPJ da empresa</label>
+            <input type="text" name="cnpj_empresa" value="{{ tecnico_cadastro.cnpj_empresa or '' }}" placeholder="00.000.000/0000-00">
+
+            <label>Mês e ano da capacitação metodológica</label>
+            <input type="month" name="mes_ano_capacitacao_metodologica" value="{{ tecnico_cadastro.mes_ano_capacitacao_metodologica.strftime('%Y-%m') if tecnico_cadastro.mes_ano_capacitacao_metodologica else '' }}">
+
+            <label>Modalidade metodológica realizada pelo técnico</label>
+            <select name="modalidade_capacitacao_metodologica" required>
+                <option value="">Escolha…</option>
+                <option value="Presencial" {% if tecnico_cadastro.modalidade_capacitacao_metodologica == "Presencial" %}selected{% endif %}>Presencial</option>
+                <option value="Online" {% if tecnico_cadastro.modalidade_capacitacao_metodologica == "Online" %}selected{% endif %}>Online</option>
+            </select>
+
+            <input type="hidden" name="data_inicio_vinculo" value="{{ tecnico_cadastro.data_inicio_vinculo.strftime('%Y-%m-%d') if tecnico_cadastro.data_inicio_vinculo else '' }}">
+            <input type="hidden" name="data_fim_vinculo" value="{{ tecnico_cadastro.data_fim_vinculo.strftime('%Y-%m-%d') if tecnico_cadastro.data_fim_vinculo else '' }}">
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao botao-dourado">Salvar</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-editar-cadastro').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+    {% endif %}
+
     {% if vinculo_ativo and (eh_meu or eh_coordenador) %}
-    <!-- Modal: editar vínculo -->
-    <dialog id="modal-editar" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+    <!-- Modal: editar vínculo (só início e fim previsto — projeto/atividade vêm da base de visitas) -->
+    <dialog id="modal-editar-vinculo" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
         <form method="post" action="/tecnicos/editar" style="padding: 24px 28px; min-width: 320px; max-width: 400px;">
             <h2 style="margin-top:0;">Editar vínculo</h2>
             <input type="hidden" name="vinculo_id" value="{{ vinculo_ativo.id }}">
             <input type="hidden" name="tecnico" value="{{ tecnico }}">
 
-            <label>CPF</label>
-            <input type="text" name="cpf" value="{{ vinculo_ativo.cpf or '' }}">
-
-            <input type="hidden" name="projeto" value="{{ vinculo_ativo.projeto or '' }}">
-            <input type="hidden" name="atividade" value="{{ vinculo_ativo.atividade or '' }}">
-            <p class="subtitulo" style="margin: 4px 0 0;">
-                Projeto e atividade vêm direto da base de visitas e não são editáveis aqui.
-            </p>
-
             <label>Início do vínculo</label>
             <input type="date" name="data_inicio" value="{{ vinculo_ativo.data_inicio.strftime('%Y-%m-%d') if vinculo_ativo.data_inicio else '' }}">
 
-            <label>Empresa responsável</label>
-            <input type="text" name="empresa" value="{{ vinculo_ativo.empresa or '' }}">
-
-            <label>CNPJ da empresa</label>
-            <input type="text" name="cnpj_empresa" value="{{ vinculo_ativo.cnpj_empresa or '' }}">
-
-            <label>Data de término prevista</label>
+            <label>Fim previsto do vínculo</label>
             <input type="date" name="data_fim_prevista" value="{{ vinculo_ativo.data_fim_prevista.strftime('%Y-%m-%d') if vinculo_ativo.data_fim_prevista else '' }}">
 
             <div style="display:flex; gap:10px; margin-top:18px;">
                 <button type="submit" class="botao botao-dourado">Salvar</button>
-                <button type="button" class="botao" onclick="document.getElementById('modal-editar').close()">Cancelar</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-editar-vinculo').close()">Cancelar</button>
             </div>
         </form>
     </dialog>
+    {% endif %}
 
-    {% if eh_coordenador %}
-    <!-- Modal: mudar de supervisor (só coordenador) -->
+    {% if vinculo_ativo and eh_coordenador %}
+    <!-- Modal: desvincular técnico (troca de supervisor) -->
     <dialog id="modal-mudar-supervisor" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
         <form method="post" action="/tecnicos/mudar-supervisor" style="padding: 24px 28px; min-width: 320px; max-width: 400px;">
-            <h2 style="margin-top:0;">Mudar de supervisor</h2>
+            <h2 style="margin-top:0;">Desvincular Técnico</h2>
             <input type="hidden" name="vinculo_id" value="{{ vinculo_ativo.id }}">
             <input type="hidden" name="tecnico" value="{{ tecnico }}">
 
             <p class="subtitulo" style="margin-top:0;">
-                Atualmente com <strong>{{ vinculo_ativo.supervisor }}</strong>. Projeto, atividade, empresa e CPF
-                são mantidos — só o supervisor muda.
+                Atualmente com <strong>{{ vinculo_ativo.supervisor }}</strong>. Projeto e atividade
+                são mantidos — selecione o novo supervisor. Motivo: Mudança de supervisor.
             </p>
 
             <label>Novo supervisor</label>
@@ -178,75 +253,120 @@
                 {% endfor %}
             </select>
 
-            <label>Data da mudança</label>
-            <input type="date" name="data_mudanca" required>
+            <label>Início do vínculo</label>
+            <input type="date" name="data_inicio" required>
+
+            <label>Fim previsto do vínculo</label>
+            <input type="date" name="data_fim_prevista">
 
             <div style="display:flex; gap:10px; margin-top:18px;">
-                <button type="submit" class="botao botao-dourado">Confirmar mudança</button>
+                <button type="submit" class="botao botao-dourado">Confirmar</button>
                 <button type="button" class="botao" onclick="document.getElementById('modal-mudar-supervisor').close()">Cancelar</button>
             </div>
         </form>
     </dialog>
     {% endif %}
 
-    <!-- Modal: desvincular técnico -->
-    <dialog id="modal-desvincular" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
-        <form method="post" action="/tecnicos/desvincular" style="padding: 24px 28px; min-width: 320px;">
-            <h2 style="margin-top:0;">Desvincular técnico</h2>
-            <input type="hidden" name="vinculo_id" value="{{ vinculo_ativo.id }}">
-            <input type="hidden" name="tecnico" value="{{ tecnico }}">
+    {% if tecnico_cadastro and eh_coordenador %}
+    <!-- Modal: desativar técnico (cadastro mestre, motivos fechados) -->
+    <dialog id="modal-desativar-tecnico" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" action="/tecnicos/{{ tecnico }}/desativar" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Desativar Técnico</h2>
+            <input type="hidden" name="id_tecnico" value="{{ tecnico_cadastro.id_tecnico_responsavel }}">
 
-            <label>Data da desvinculação</label>
-            <input type="date" name="data_desvinculacao" required>
-
-            <label>Motivo da desvinculação</label>
-            <select id="d-motivo-select" required>
-                {% for m in motivos %}
+            <label>Motivo</label>
+            <select id="dt-motivo-select" required>
+                {% for m in motivos_desativacao_tecnico %}
                 <option value="{{ m }}">{{ m }}</option>
                 {% endfor %}
                 <option value="Outro">Outro</option>
             </select>
 
-            <div id="d-outro-wrap" style="display:none; margin-top: 10px;">
+            <div id="dt-outro-wrap" style="display:none; margin-top: 10px;">
                 <label>Descreva o motivo</label>
-                <textarea id="d-outro-texto" rows="2" placeholder="Descrição obrigatória"></textarea>
+                <textarea id="dt-outro-texto" rows="2" placeholder="Descrição obrigatória"></textarea>
             </div>
 
-            <input type="hidden" name="motivo_desvinculacao" id="d-motivo-final">
+            <div style="margin-top: 10px;">
+                <label>Avaliação do Técnico</label>
+                <textarea id="dt-avaliacao-texto" rows="2" placeholder="Descrição obrigatória" required></textarea>
+            </div>
+
+            <input type="hidden" name="motivo_desativacao" id="dt-motivo-final">
 
             <div style="display:flex; gap:10px; margin-top:18px;">
-                <button type="submit" class="botao">Confirmar desvinculação</button>
-                <button type="button" class="botao" onclick="document.getElementById('modal-desvincular').close()">Cancelar</button>
+                <button type="submit" class="botao">Confirmar desativação</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-desativar-tecnico').close()">Cancelar</button>
             </div>
         </form>
     </dialog>
 
     <script>
-        const selectMotivo = document.getElementById('d-motivo-select');
-        const outroWrap = document.getElementById('d-outro-wrap');
-        const outroTexto = document.getElementById('d-outro-texto');
-        const motivoFinal = document.getElementById('d-motivo-final');
+        function ligarSelectMotivo(idSelect, idWrap, idTexto, idFinal, seletorForm) {
+            const select = document.getElementById(idSelect);
+            const wrap = document.getElementById(idWrap);
+            const texto = document.getElementById(idTexto);
+            const final_ = document.getElementById(idFinal);
+            if (!select) return;
 
-        selectMotivo.addEventListener('change', function () {
-            outroWrap.style.display = this.value === 'Outro' ? 'block' : 'none';
-        });
-        // Roda uma vez já na carga da página, cobrindo o caso do navegador
-        // restaurar a opção selecionada (ex: voltar/recarregar) sem disparar "change".
-        outroWrap.style.display = selectMotivo.value === 'Outro' ? 'block' : 'none';
+            select.addEventListener('change', function () {
+                wrap.style.display = this.value === 'Outro' ? 'block' : 'none';
+            });
+            wrap.style.display = select.value === 'Outro' ? 'block' : 'none';
 
-        document.querySelector('#modal-desvincular form').addEventListener('submit', function (ev) {
-            if (selectMotivo.value === 'Outro') {
-                if (!outroTexto.value.trim()) {
+            document.querySelector(seletorForm).addEventListener('submit', function (ev) {
+                if (select.value === 'Outro') {
+                    if (!texto.value.trim()) {
+                        ev.preventDefault();
+                        texto.focus();
+                        return;
+                    }
+                    final_.value = 'Outro: ' + texto.value.trim();
+                } else {
+                    final_.value = select.value;
+                }
+            });
+        }
+
+        ligarSelectMotivo('ms-motivo-select', 'ms-outro-wrap', 'ms-outro-texto', 'ms-motivo-final', '#modal-mudar-supervisor form');
+
+        (function () {
+            const select = document.getElementById('dt-motivo-select');
+            if (!select) return;
+            const outroWrap = document.getElementById('dt-outro-wrap');
+            const outroTexto = document.getElementById('dt-outro-texto');
+            const avaliacaoTexto = document.getElementById('dt-avaliacao-texto');
+            const motivoFinal = document.getElementById('dt-motivo-final');
+
+            function atualizarVisibilidade() {
+                outroWrap.style.display = select.value === 'Outro' ? 'block' : 'none';
+            }
+
+            select.addEventListener('change', atualizarVisibilidade);
+            atualizarVisibilidade();
+
+            document.querySelector('#modal-desativar-tecnico form').addEventListener('submit', function (ev) {
+                if (!avaliacaoTexto.value.trim()) {
                     ev.preventDefault();
-                    outroTexto.focus();
+                    avaliacaoTexto.focus();
                     return;
                 }
-                motivoFinal.value = 'Outro: ' + outroTexto.value.trim();
-            } else {
-                motivoFinal.value = selectMotivo.value;
-            }
-        });
+                let motivo;
+                if (select.value === 'Outro') {
+                    if (!outroTexto.value.trim()) {
+                        ev.preventDefault();
+                        outroTexto.focus();
+                        return;
+                    }
+                    motivo = 'Outro: ' + outroTexto.value.trim();
+                } else {
+                    motivo = select.value;
+                }
+                motivoFinal.value = motivo + ' — Avaliação do Técnico: ' + avaliacaoTexto.value.trim();
+            });
+        })();
     </script>
     {% endif %}
+
 </body>
 </html>

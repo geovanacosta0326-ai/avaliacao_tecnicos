@@ -2,6 +2,7 @@ import os
 import io
 import json
 from datetime import date
+from urllib.parse import quote
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,14 +21,32 @@ app = FastAPI(title="Avaliação de Técnicos")
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "troque-esta-chave"))
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["normalizar"] = repositorio.normalizar
 # Workaround: bug conhecido do Jinja2 no Python 3.14 quebra o cache interno
 # de templates (https://github.com/pallets/jinja/issues/2180).
 # Desabilitar o cache evita o erro "cannot use 'tuple' as a dict key".
 templates.env.cache = None
 
 
+@app.on_event("startup")
+def _rodar_migracoes_no_startup():
+    """Garante as colunas necessárias UMA VEZ, na subida do servidor —
+    não a cada clique (ver o porquê em repositorio.rodar_migracoes_unicas)."""
+    repositorio.rodar_migracoes_unicas()
+
+
 def supervisor_logado(request: Request) -> str | None:
     return request.session.get("supervisor")
+
+
+def _parse_data_opcional(valor: str | None) -> date | None:
+    """Converte string de formulário em date, tratando "" (campo deixado em
+    branco) como None. O FastAPI/Pydantic sozinho tenta parsear "" como data
+    e quebra com erro 422 — por isso campos de data opcionais chegam aqui
+    como str e passam por essa função antes de seguir pro banco."""
+    if not valor or not valor.strip():
+        return None
+    return date.fromisoformat(valor.strip())
 
 
 def exigir_login(request: Request):
@@ -237,7 +256,7 @@ def painel(request: Request, mes: str | None = Query(default=None)):
     pendentes = total - avaliados
     pct_conclusao = round(avaliados / total * 100, 1) if total else 0.0
     medias_validas = [r["nota_final"] for r in ranking if r["nota_final"] is not None]
-    soma_propria = sum(medias_validas) if medias_validas else None
+    media_propria = round(sum(medias_validas) / len(medias_validas), 2) if medias_validas else None
 
     data_limite = repositorio.data_limite_do_mes(mes_ref)
     prazo_encerrado = date.today() > data_limite
@@ -256,7 +275,7 @@ def painel(request: Request, mes: str | None = Query(default=None)):
             "avaliados": avaliados,
             "pendentes": pendentes,
             "pct_conclusao": pct_conclusao,
-            "soma_propria": soma_propria,
+            "media_propria": media_propria,
             "data_limite": data_limite.strftime("%d/%m/%Y"),
             "prazo_encerrado": prazo_encerrado,
             "autorizado_apos_prazo": autorizado_apos_prazo,
@@ -332,6 +351,7 @@ def detalhe_avaliacao(request: Request, avaliacao_id: int):
         raise HTTPException(status_code=404, detail="Avaliação não encontrada.")
 
     blocos = avaliacoes.montar_blocos_para_exibicao(avaliacao)
+    resumo_visitas = repositorio.resumo_visitas_tecnico(avaliacao["tecnico"], avaliacao["mes_referencia"])
     return templates.TemplateResponse(
         "avaliacao_detalhe.html",
         {
@@ -339,6 +359,7 @@ def detalhe_avaliacao(request: Request, avaliacao_id: int):
             "avaliacao": avaliacao,
             "blocos": blocos,
             "mes_referencia": avaliacao["mes_referencia"].strftime("%m/%Y"),
+            "resumo_visitas": resumo_visitas,
         },
     )
 
@@ -350,6 +371,20 @@ def detalhe_avaliacao(request: Request, avaliacao_id: int):
 #   Passo 3: ao clicar num supervisor, lista de técnicos + avaliações dele
 # ══════════════════════════════════════════════════════════
 @app.get("/coordenador")
+def painel_coordenador_home(request: Request):
+    """Tela inicial do coordenador: só os 4 links, sem pedir mês."""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    return templates.TemplateResponse(
+        "coordenador_home.html",
+        {"request": request, "supervisor": request.session.get("supervisor")},
+    )
+
+
+@app.get("/coordenador/avaliacao")
 def painel_coordenador(
     request: Request,
     mes: str | None = Query(default=None),
@@ -370,7 +405,7 @@ def painel_coordenador(
                 "request": request,
                 "supervisor": request.session.get("supervisor"),
                 "meses_disponiveis": meses_disponiveis,
-                "destino": "/coordenador",
+                "destino": "/coordenador/avaliacao",
             },
         )
 
@@ -484,28 +519,45 @@ def tela_gestao_tecnicos(request: Request):
     if request.session.get("tipo") == "coordenador":
         return RedirectResponse("/coordenador", status_code=303)
 
-    # "Até 2 meses antes do mês atual" — ex: hoje é julho/2026, então
-    # mes_limite = 01/05/2026 (maio, junho, julho contam como "recente").
-    hoje = date.today()
-    ano, mes = hoje.year, hoje.month - 2
-    while mes <= 0:
-        mes += 12
-        ano -= 1
-    mes_limite = date(ano, mes, 1)
-
-    repositorio_vinculo_tecnico.auto_desvincular_tecnicos_inativos(supervisor, mes_limite)
-    repositorio_vinculo_tecnico.auto_vincular_tecnicos_recentes(supervisor, mes_limite)
+    # Auto-vincular/auto-desvincular DESATIVADOS (2026-07): vínculo e
+    # desvínculo técnico-supervisor agora são sempre feitos manualmente
+    # pelo coordenador, em /coordenador/cadastros. O supervisor só
+    # visualiza a equipe aqui — sem nenhuma ação de vincular/desvincular
+    # no próprio perfil. O histórico de desvínculos fica em página
+    # separada (/tecnicos-desvinculados) pra não poluir esta tela.
 
     todos_vinculos = repositorio_vinculo_tecnico.listar_vinculos_do_supervisor(supervisor)
-    disponiveis = repositorio_vinculo_tecnico.listar_tecnicos_sem_vinculo_ativo_com_este_supervisor(supervisor, mes_limite)
     return templates.TemplateResponse(
         "gestao_tecnicos.html",
         {
             "request": request,
             "supervisor": supervisor,
             "vinculados": [v for v in todos_vinculos if v["data_desvinculacao"] is None],
-            "disponiveis": disponiveis,
-            "motivos": repositorio_vinculo_tecnico.MOTIVOS_DESVINCULACAO,
+            "total_desvinculados": sum(1 for v in todos_vinculos if v["data_desvinculacao"] is not None),
+        },
+    )
+
+
+@app.get("/tecnicos-desvinculados")
+def tela_tecnicos_desvinculados(request: Request):
+    supervisor = supervisor_logado(request)
+    if not supervisor:
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") == "coordenador":
+        return RedirectResponse("/coordenador", status_code=303)
+
+    todos_vinculos = repositorio_vinculo_tecnico.listar_vinculos_do_supervisor(supervisor)
+    desvinculados = sorted(
+        (v for v in todos_vinculos if v["data_desvinculacao"] is not None),
+        key=lambda v: v["data_desvinculacao"],
+        reverse=True,
+    )
+    return templates.TemplateResponse(
+        "tecnicos_desvinculados.html",
+        {
+            "request": request,
+            "supervisor": supervisor,
+            "desvinculados": desvinculados,
         },
     )
 
@@ -526,6 +578,7 @@ def tela_detalhe_tecnico(request: Request, tecnico: str):
     vinculo_ativo = repositorio_vinculo_tecnico.obter_vinculo_ativo_do_tecnico(tecnico)
     visita = repositorio_vinculo_tecnico.obter_visita_tecnico(tecnico)
     historico = repositorio_vinculo_tecnico.historico_tecnico(tecnico)
+    tecnico_cadastro = repositorio.obter_tecnico_por_nome(tecnico)
 
     eh_meu = vinculo_ativo is not None and vinculo_ativo["supervisor"] == supervisor
     eh_coordenador = request.session.get("tipo") == "coordenador"
@@ -542,6 +595,8 @@ def tela_detalhe_tecnico(request: Request, tecnico: str):
             "visita": visita,
             "historico": [h for h in historico if h["data_desvinculacao"] is not None],
             "motivos": repositorio_vinculo_tecnico.MOTIVOS_DESVINCULACAO,
+            "tecnico_cadastro": tecnico_cadastro,
+            "motivos_desativacao_tecnico": repositorio.MOTIVOS_DESATIVACAO_TECNICO,
         },
     )
 
@@ -556,23 +611,26 @@ def criar_vinculo_tecnico(
     empresa: str = Form(""),
     cnpj_empresa: str = Form(""),
     data_inicio: date = Form(...),
-    data_fim_prevista: date | None = Form(None),
+    data_fim_prevista: str | None = Form(None),
     supervisor_escolhido: str | None = Form(default=None),
 ):
     supervisor = supervisor_logado(request)
     if not supervisor:
         return RedirectResponse("/login", status_code=303)
 
-    # Coordenador pode vincular em nome de qualquer supervisor (escolhendo
-    # no formulário); supervisor comum sempre vincula em nome dele mesmo.
-    eh_coordenador = request.session.get("tipo") == "coordenador"
-    supervisor_do_vinculo = supervisor_escolhido if (eh_coordenador and supervisor_escolhido) else supervisor
+    # Só o coordenador credencia (vincula) técnico — supervisor não decide
+    # mais isso sozinho, só o coordenador em /coordenador/cadastros/associar
+    # (ou aqui mesmo, escolhendo o supervisor no formulário).
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    supervisor_do_vinculo = supervisor_escolhido or supervisor
 
     repositorio_vinculo_tecnico.criar_vinculo(
         tecnico=tecnico,
         supervisor=supervisor_do_vinculo,
         data_inicio=data_inicio,
-        data_fim_prevista=data_fim_prevista,
+        data_fim_prevista=_parse_data_opcional(data_fim_prevista),
         cpf=cpf,
         projeto=projeto,
         atividade=atividade,
@@ -588,27 +646,19 @@ def editar_vinculo_tecnico(
     request: Request,
     vinculo_id: int = Form(...),
     tecnico: str = Form(...),
-    cpf: str = Form(""),
-    projeto: str = Form(""),
-    atividade: str = Form(""),
-    empresa: str = Form(""),
-    cnpj_empresa: str = Form(""),
-    data_inicio: date | None = Form(None),
-    data_fim_prevista: date | None = Form(None),
+    data_inicio: str | None = Form(None),
+    data_fim_prevista: str | None = Form(None),
 ):
+    """Edita só o início e o fim previsto do vínculo ativo — projeto e
+    atividade vêm da base de visitas e não são editáveis aqui."""
     supervisor = supervisor_logado(request)
     if not supervisor:
         return RedirectResponse("/login", status_code=303)
 
-    repositorio_vinculo_tecnico.editar_vinculo(
+    repositorio_vinculo_tecnico.editar_datas_vinculo(
         vinculo_id=vinculo_id,
-        cpf=cpf,
-        projeto=projeto,
-        atividade=atividade,
-        empresa=empresa,
-        cnpj_empresa=cnpj_empresa,
-        data_inicio=data_inicio,
-        data_fim_prevista=data_fim_prevista,
+        data_inicio=_parse_data_opcional(data_inicio),
+        data_fim_prevista=_parse_data_opcional(data_fim_prevista),
     )
     return RedirectResponse(f"/tecnicos/{tecnico}", status_code=303)
 
@@ -619,10 +669,13 @@ def mudar_supervisor_tecnico(
     vinculo_id: int = Form(...),
     tecnico: str = Form(...),
     novo_supervisor: str = Form(...),
-    data_mudanca: date = Form(...),
+    data_inicio: date = Form(...),
+    data_fim_prevista: str | None = Form(None),
 ):
     """Só o coordenador vê esse botão — troca o supervisor de um técnico
-    em um único passo, mantendo projeto/atividade/empresa/CPF do vínculo atual."""
+    em um único passo, mantendo projeto/atividade/empresa/CPF do vínculo atual.
+    O motivo é sempre "Mudança de supervisor": é a única razão de existir
+    dessa ação (pra outros motivos de desvínculo, use "Desativar Técnico")."""
     if not supervisor_logado(request):
         return RedirectResponse("/login", status_code=303)
     if request.session.get("tipo") != "coordenador":
@@ -634,20 +687,56 @@ def mudar_supervisor_tecnico(
 
     repositorio_vinculo_tecnico.desvincular_vinculo(
         vinculo_id=vinculo_id,
-        data_desvinculacao=data_mudanca,
-        motivo=f"Mudança de supervisor (definido pelo coordenador, antes com {vinculo_atual['supervisor']})",
+        data_desvinculacao=data_inicio,
+        motivo="Mudança de supervisor",
     )
     repositorio_vinculo_tecnico.criar_vinculo(
         tecnico=tecnico,
         supervisor=novo_supervisor,
-        data_inicio=data_mudanca,
+        data_inicio=data_inicio,
         criado_por=request.session.get("login", "coordenador"),
         cpf=vinculo_atual.get("cpf"),
         projeto=vinculo_atual.get("projeto"),
         atividade=vinculo_atual.get("atividade"),
         empresa=vinculo_atual.get("empresa"),
         cnpj_empresa=vinculo_atual.get("cnpj_empresa"),
+        data_fim_prevista=_parse_data_opcional(data_fim_prevista),
     )
+    return RedirectResponse(f"/tecnicos/{tecnico}", status_code=303)
+
+
+@app.post("/tecnicos/{tecnico}/desativar")
+def desativar_tecnico_na_pagina(
+    request: Request,
+    tecnico: str,
+    id_tecnico: int = Form(...),
+    motivo_desativacao: str = Form(...),
+):
+    """
+    Desativa o técnico (tabela mestra 'tecnicos') direto da página de
+    detalhe dele, com motivo obrigatório. Se ele tiver um vínculo ativo,
+    esse vínculo também é encerrado automaticamente — um técnico
+    desativado não fica com vínculo aberto.
+    """
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    tecnico_real = repositorio_vinculo_tecnico.resolver_nome_tecnico(tecnico)
+    if tecnico_real is not None:
+        tecnico = tecnico_real
+
+    repositorio.definir_ativo_tecnico(id_tecnico, False, motivo_desativacao)
+
+    vinculo_ativo = repositorio_vinculo_tecnico.obter_vinculo_ativo_do_tecnico(tecnico)
+    if vinculo_ativo is not None:
+        repositorio_vinculo_tecnico.desvincular_vinculo(
+            vinculo_id=vinculo_ativo["id"],
+            data_desvinculacao=date.today(),
+            motivo=f"Técnico desativado: {motivo_desativacao}",
+        )
+
     return RedirectResponse(f"/tecnicos/{tecnico}", status_code=303)
 
 
@@ -664,6 +753,11 @@ def desvincular_vinculo_tecnico(
     if not supervisor:
         return RedirectResponse("/login", status_code=303)
 
+    # Só o coordenador descredencia (desvincula) técnico — igual ao
+    # credenciamento, supervisor não decide isso mais sozinho.
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
     repositorio_vinculo_tecnico.desvincular_vinculo(
         vinculo_id=vinculo_id, data_desvinculacao=data_desvinculacao, motivo=motivo_desvinculacao
     )
@@ -672,6 +766,89 @@ def desvincular_vinculo_tecnico(
     # continua no detalhe (que já mostra o formulário de complementar cadastro).
     destino = redirecionar_para or f"/tecnicos/{tecnico}"
     return RedirectResponse(destino, status_code=303)
+
+
+@app.get("/coordenador/tecnicos-desativados")
+def tela_tecnicos_desativados_coordenador(request: Request):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    return templates.TemplateResponse(
+        "tecnicos_desativados_coordenador.html",
+        {
+            "request": request,
+            "supervisor": request.session.get("supervisor"),
+            "desativados": repositorio.listar_tecnicos_desativados(),
+            "historico_desvinculacoes": repositorio_vinculo_tecnico.listar_historico_desvinculacoes(),
+        },
+    )
+
+
+@app.get("/coordenador/tecnicos/relatorio")
+def tela_relatorio_completo_tecnicos(request: Request, supervisor: str | None = Query(default=None)):
+    """Relatório com TODO técnico cadastrado, dados cadastrais + situação
+    atual (ativo/desativado/descredenciado) — pra visualizar e imprimir."""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    return templates.TemplateResponse(
+        "relatorio_tecnicos.html",
+        {
+            "request": request,
+            "supervisor": request.session.get("supervisor"),
+            "supervisores": repositorio.listar_supervisores_cadastrados(apenas_ativos=True),
+            "supervisor_escolhido": supervisor,
+            "tecnicos": repositorio.listar_relatorio_completo_tecnicos(supervisor),
+        },
+    )
+
+
+@app.get("/coordenador/tecnicos/relatorio.xlsx")
+def baixar_relatorio_completo_tecnicos(request: Request, supervisor: str | None = Query(default=None)):
+    """Mesmo relatório de cima, em Excel pra baixar."""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    cabecalho = [
+        "Nome", "Situação", "Projeto", "Atividade", "Motivo (desativação)", "Avaliação do Técnico",
+        "RG", "CPF", "Contato", "E-mail",
+        "Endereço", "Município", "Empresa", "CNPJ da empresa",
+        "Capacitação metodológica (mês/ano)", "Modalidade da capacitação",
+    ]
+    wb, ws = _nova_planilha(cabecalho)
+    ws.title = "Técnicos"
+    for t in repositorio.listar_relatorio_completo_tecnicos(supervisor):
+        capacitacao = t.get("mes_ano_capacitacao_metodologica")
+        ws.append([
+            t["nome"], t["situacao"], t.get("projeto_atual") or "", t.get("atividade_atual") or "",
+            t.get("motivo_desativacao_curto") or "",
+            t.get("avaliacao_desativacao") or "",
+            t.get("rg") or "", t.get("cpf") or "",
+            t.get("contato") or "", t.get("email") or "", t.get("endereco") or "",
+            t.get("municipio") or "", t.get("empresa") or "", t.get("cnpj_empresa") or "",
+            capacitacao.strftime("%m/%Y") if capacitacao else "",
+            t.get("modalidade_capacitacao_metodologica") or "",
+        ])
+    _ajustar_largura_colunas(ws, cabecalho)
+    nome_arquivo = f"relatorio_tecnicos_{supervisor}.xlsx" if supervisor else "relatorio_tecnicos.xlsx"
+    return _resposta_xlsx(wb, nome_arquivo)
+
+
+@app.post("/coordenador/tecnicos-desativados/{id_tecnico}/reativar")
+def reativar_tecnico_coordenador(request: Request, id_tecnico: int):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    repositorio.definir_ativo_tecnico(id_tecnico, True)
+    return RedirectResponse("/coordenador/tecnicos-desativados", status_code=303)
 
 
 @app.get("/coordenador/vinculos-tecnicos")
@@ -690,6 +867,427 @@ def tela_vinculos_tecnicos_coordenador(request: Request):
             "vinculos": vinculos,
         },
     )
+
+
+@app.get("/coordenador/cadastros/associar")
+def tela_associar_tecnicos(request: Request, supervisor: str | None = Query(default=None)):
+    """Escolhe um supervisor, marca os técnicos dele (dos cadastros mestres) e associa em lote."""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    supervisores = repositorio.listar_supervisores_cadastrados(apenas_ativos=True)
+    todos_tecnicos = repositorio.listar_tecnicos_cadastrados(apenas_ativos=True)
+
+    # Vínculo ativo com QUALQUER supervisor (não só o selecionado) — um
+    # técnico já vinculado a outro supervisor não pode aparecer como
+    # "Disponível" aqui, senão o coordenador marca ele achando que está
+    # livre e a associação falha silenciosamente (índice único do banco).
+    vinculos_ativos = repositorio_vinculo_tecnico.listar_todos_vinculos_ativos()
+    supervisor_atual_por_tecnico = {
+        repositorio.normalizar(v["tecnico"]): v["supervisor"] for v in vinculos_ativos
+    }
+
+    return templates.TemplateResponse(
+        "associar_tecnicos.html",
+        {
+            "request": request,
+            "supervisores": supervisores,
+            "tecnicos": todos_tecnicos,
+            "supervisor_escolhido": supervisor,
+            "supervisor_atual_por_tecnico": supervisor_atual_por_tecnico,
+        },
+    )
+
+
+@app.post("/coordenador/cadastros/associar")
+async def associar_tecnicos_em_lote(request: Request):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    form = await request.form()
+    supervisor = form.get("supervisor")
+    tecnicos_ids = form.getlist("tecnicos")
+    coordenador_login = request.session.get("login", "coordenador")
+
+    associados = 0
+    for id_tecnico in tecnicos_ids:
+        tecnico_cadastro = repositorio.obter_tecnico(int(id_tecnico))
+        if not tecnico_cadastro:
+            continue
+        try:
+            repositorio_vinculo_tecnico.criar_vinculo(
+                tecnico=tecnico_cadastro["nome"],
+                supervisor=supervisor,
+                data_inicio=date.today(),
+                criado_por=coordenador_login,
+                cpf=tecnico_cadastro.get("cpf"),
+                empresa=tecnico_cadastro.get("empresa"),
+                cnpj_empresa=tecnico_cadastro.get("cnpj_empresa"),
+            )
+            associados += 1
+        except Exception:
+            # Provavelmente já está ativo com esse ou outro supervisor — pula.
+            continue
+
+    return RedirectResponse(f"/coordenador/cadastros/associar?supervisor={supervisor}", status_code=303)
+
+
+@app.post("/coordenador/cadastros/tecnico/descredenciar")
+def descredenciar_tecnico_coordenador(
+    request: Request,
+    vinculo_id: int = Form(...),
+    motivo_desvinculacao: str = Form(...),
+    novo_supervisor: str = Form(""),
+    data_inicio_novo: str | None = Form(None),
+    data_fim_prevista_novo: str | None = Form(None),
+):
+    coordenador_login = supervisor_logado(request)
+    if not coordenador_login:
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    # Pega os dados do vínculo ANTES de encerrar, pra poder recriar no
+    # supervisor novo (mesmo técnico, cpf, empresa, cnpj) se for transferência.
+    vinculo_antigo = repositorio_vinculo_tecnico.obter_vinculo(vinculo_id)
+
+    repositorio_vinculo_tecnico.desvincular_vinculo(
+        vinculo_id=vinculo_id, data_desvinculacao=date.today(), motivo=motivo_desvinculacao
+    )
+
+    if novo_supervisor and vinculo_antigo:
+        repositorio_vinculo_tecnico.criar_vinculo(
+            tecnico=vinculo_antigo["tecnico"],
+            supervisor=novo_supervisor,
+            data_inicio=_parse_data_opcional(data_inicio_novo) or date.today(),
+            data_fim_prevista=_parse_data_opcional(data_fim_prevista_novo),
+            criado_por=coordenador_login,
+            cpf=vinculo_antigo.get("cpf"),
+            empresa=vinculo_antigo.get("empresa"),
+            cnpj_empresa=vinculo_antigo.get("cnpj_empresa"),
+        )
+
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.post("/coordenador/cadastros/tecnico/reverter")
+def reverter_descredenciamento_coordenador(request: Request, vinculo_id: int = Form(...)):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    try:
+        repositorio_vinculo_tecnico.reverter_desvinculacao(vinculo_id)
+    except Exception:
+        # Provavelmente o técnico já tem outro vínculo ativo (foi
+        # transferido depois) — não dá pra reverter sem tirar de lá primeiro.
+        # Busca com qual supervisor ele está agora pra deixar isso claro
+        # em vez de só dizer "outro vínculo ativo" sem dizer qual.
+        mensagem = "Não foi possível reverter: esse técnico já tem outro vínculo ativo. Descredencie o vínculo atual dele primeiro."
+        vinculo_antigo = repositorio_vinculo_tecnico.obter_vinculo(vinculo_id)
+        if vinculo_antigo:
+            vinculo_atual = repositorio_vinculo_tecnico.obter_vinculo_ativo_do_tecnico(vinculo_antigo["tecnico"])
+            if vinculo_atual:
+                mensagem = (
+                    f"Não foi possível reverter: {vinculo_antigo['tecnico']} já está vinculado a "
+                    f"{vinculo_atual['supervisor']} desde "
+                    f"{vinculo_atual['data_inicio'].strftime('%d/%m/%Y') if vinculo_atual.get('data_inicio') else '—'}. "
+                    f"Descredencie esse vínculo atual primeiro."
+                )
+        return RedirectResponse(
+            f"/coordenador/cadastros?erro={quote(mensagem)}",
+            status_code=303,
+        )
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.get("/coordenador/cadastros")
+def tela_cadastros(request: Request):
+    """Tela do coordenador: inserir supervisor manualmente e ver/ativar/
+    desativar supervisores. (A parte de técnicos fica de fora por enquanto,
+    só a de supervisores está em uso nesta aba.)"""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    # Traz pra tabela 'supervisores' quem já tem login como tipo 'supervisor'
+    # em usuarios_supervisores (não duplica quem já estava aqui).
+    repositorio.sincronizar_supervisores_de_usuarios()
+
+    supervisores = repositorio.listar_supervisores_cadastrados()
+    vinculos_por_supervisor = {
+        s["id"]: repositorio_vinculo_tecnico.listar_vinculos_do_supervisor(s["nome"])
+        for s in supervisores
+    }
+    return templates.TemplateResponse(
+        "cadastros_coordenador.html",
+        {
+            "request": request,
+            "supervisores": supervisores,
+            "motivos_desativacao_supervisor": repositorio.MOTIVOS_DESATIVACAO_SUPERVISOR,
+            "motivos_desvinculacao_tecnico": repositorio_vinculo_tecnico.MOTIVOS_DESVINCULACAO,
+            "motivos_desativacao_tecnico": repositorio.MOTIVOS_DESATIVACAO_TECNICO,
+            "projetos_por_supervisor": {
+                s["id"]: repositorio.listar_projetos_do_supervisor(s["nome"])
+                for s in supervisores
+            },
+            "tecnicos_vinculados_por_supervisor": {
+                s["id"]: repositorio.contar_tecnicos_vinculados(s["nome"])
+                for s in supervisores
+            },
+            "vinculos_ativos_por_supervisor": {
+                sid: [v for v in vinculos if v["data_desvinculacao"] is None]
+                for sid, vinculos in vinculos_por_supervisor.items()
+            },
+            "historico_por_supervisor": {
+                sid: [v for v in vinculos if v["data_desvinculacao"] is not None]
+                for sid, vinculos in vinculos_por_supervisor.items()
+            },
+            "historico_desativados_por_supervisor": {
+                sid: [
+                    v for v in vinculos
+                    if v["data_desvinculacao"] is not None
+                    and (v["motivo_desvinculacao"] or "").startswith("Técnico desativado")
+                ]
+                for sid, vinculos in vinculos_por_supervisor.items()
+            },
+            "historico_descredenciados_por_supervisor": {
+                sid: [
+                    v for v in vinculos
+                    if v["data_desvinculacao"] is not None
+                    and not (v["motivo_desvinculacao"] or "").startswith("Técnico desativado")
+                ]
+                for sid, vinculos in vinculos_por_supervisor.items()
+            },
+            "supervisores_ativos_nomes": [s["nome"] for s in supervisores if s["ativo"]],
+            "erro": request.query_params.get("erro"),
+        },
+    )
+
+
+@app.post("/coordenador/cadastros/supervisor/criar")
+def criar_supervisor_cadastro(
+    request: Request,
+    nome: str = Form(...),
+    rg: str = Form(""),
+    cpf: str = Form(""),
+    contato: str = Form(""),
+    empresa: str = Form(""),
+    cnpj_empresa: str = Form(""),
+    data_inicio_vinculo: str | None = Form(None),
+    data_fim_vinculo: str | None = Form(None),
+):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    repositorio.criar_supervisor(
+        nome, rg=rg, cpf=cpf, contato=contato, empresa=empresa, cnpj_empresa=cnpj_empresa,
+        data_inicio_vinculo=_parse_data_opcional(data_inicio_vinculo),
+        data_fim_vinculo=_parse_data_opcional(data_fim_vinculo),
+    )
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.post("/coordenador/cadastros/supervisor/{supervisor_id}/excluir")
+def excluir_supervisor_cadastro(request: Request, supervisor_id: int, nome: str = Form(...)):
+    """Exclui de vez o cadastro do supervisor — só permitido se ele não
+    tiver nenhum técnico vinculado no momento."""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    try:
+        repositorio.excluir_supervisor(supervisor_id, nome)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Não é possível excluir: supervisor ainda tem técnico(s) vinculado(s).")
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.post("/coordenador/cadastros/supervisor/{supervisor_id}/ativo")
+def alterar_ativo_supervisor(
+    request: Request,
+    supervisor_id: int,
+    ativo: bool = Form(...),
+    motivo_desativacao: str = Form(""),
+):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    repositorio.definir_ativo_supervisor(supervisor_id, ativo, motivo_desativacao)
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.post("/coordenador/cadastros/tecnico/{id_tecnico}/ativo")
+def alterar_ativo_tecnico(request: Request, id_tecnico: int, ativo: bool = Form(...), motivo_desativacao: str = Form("")):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    repositorio.definir_ativo_tecnico(id_tecnico, ativo, motivo_desativacao)
+
+    # Um técnico desativado não fica com vínculo aberto — encerra
+    # automaticamente e ele passa a aparecer no Histórico, não mais na Equipe.
+    if not ativo:
+        tecnico_cadastro = repositorio.obter_tecnico(id_tecnico)
+        if tecnico_cadastro is not None:
+            vinculo_ativo = repositorio_vinculo_tecnico.obter_vinculo_ativo_do_tecnico(tecnico_cadastro["nome"])
+            if vinculo_ativo is not None:
+                repositorio_vinculo_tecnico.desvincular_vinculo(
+                    vinculo_id=vinculo_ativo["id"],
+                    data_desvinculacao=date.today(),
+                    motivo=f"Técnico desativado: {motivo_desativacao}" if motivo_desativacao else "Técnico desativado",
+                )
+
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.post("/coordenador/cadastros/tecnico/{id_tecnico}/editar")
+def editar_dados_cadastrais_tecnico(
+    request: Request,
+    id_tecnico: int,
+    rg: str = Form(""),
+    cpf: str = Form(""),
+    contato: str = Form(""),
+    email: str = Form(""),
+    empresa: str = Form(""),
+    cnpj_empresa: str = Form(""),
+    endereco: str = Form(""),
+    municipio: str = Form(""),
+    data_inicio_vinculo: str | None = Form(None),
+    data_fim_vinculo: str | None = Form(None),
+    mes_ano_capacitacao_metodologica: str | None = Form(None),
+    modalidade_capacitacao_metodologica: str = Form(""),
+):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    mes_ano_capacitacao = None
+    if mes_ano_capacitacao_metodologica:
+        mes_ano_capacitacao = _parse_data_opcional(mes_ano_capacitacao_metodologica + "-01")
+
+    repositorio.atualizar_dados_cadastrais_tecnico(
+        id_tecnico_responsavel=id_tecnico,
+        rg=rg, cpf=cpf, contato=contato, email=email, empresa=empresa, cnpj_empresa=cnpj_empresa,
+        endereco=endereco, municipio=municipio,
+        data_inicio_vinculo=_parse_data_opcional(data_inicio_vinculo),
+        data_fim_vinculo=_parse_data_opcional(data_fim_vinculo),
+        mes_ano_capacitacao_metodologica=mes_ano_capacitacao,
+        modalidade_capacitacao_metodologica=modalidade_capacitacao_metodologica or None,
+    )
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.post("/tecnicos/{tecnico}/cadastro/editar")
+def editar_dados_cadastrais_tecnico_na_pagina(
+    request: Request,
+    tecnico: str,
+    id_tecnico: int = Form(...),
+    rg: str = Form(""),
+    cpf: str = Form(""),
+    contato: str = Form(""),
+    email: str = Form(""),
+    empresa: str = Form(""),
+    cnpj_empresa: str = Form(""),
+    endereco: str = Form(""),
+    municipio: str = Form(""),
+    data_inicio_vinculo: str | None = Form(None),
+    data_fim_vinculo: str | None = Form(None),
+    mes_ano_capacitacao_metodologica: str | None = Form(None),
+    modalidade_capacitacao_metodologica: str = Form(...),
+):
+    """
+    Mesma atualização de dados cadastrais do técnico (tabela mestra
+    'tecnicos'), só que disparada direto da página /tecnicos/{tecnico}
+    (em vez da tela de gestão do coordenador), voltando pra essa mesma
+    página depois de salvar.
+    """
+    supervisor = supervisor_logado(request)
+    if not supervisor:
+        return RedirectResponse("/login", status_code=303)
+
+    tecnico_real = repositorio_vinculo_tecnico.resolver_nome_tecnico(tecnico)
+    if tecnico_real is not None:
+        tecnico = tecnico_real
+
+    # Só quem é responsável pelo técnico agora ou o coordenador geral
+    # pode editar os dados cadastrais dele.
+    vinculo_ativo = repositorio_vinculo_tecnico.obter_vinculo_ativo_do_tecnico(tecnico)
+    eh_meu = vinculo_ativo is not None and vinculo_ativo["supervisor"] == supervisor
+    eh_coordenador = request.session.get("tipo") == "coordenador"
+    if not (eh_meu or eh_coordenador):
+        raise HTTPException(status_code=403, detail="Sem permissão pra editar o cadastro deste técnico.")
+
+    # O input type="month" do formulário manda "AAAA-MM" — completa com o
+    # dia 01 pra virar uma data válida (guardamos só mês/ano mesmo).
+    mes_ano_capacitacao = None
+    if mes_ano_capacitacao_metodologica:
+        mes_ano_capacitacao = _parse_data_opcional(mes_ano_capacitacao_metodologica + "-01")
+
+    repositorio.atualizar_dados_cadastrais_tecnico(
+        id_tecnico_responsavel=id_tecnico,
+        rg=rg, cpf=cpf, contato=contato, email=email, empresa=empresa, cnpj_empresa=cnpj_empresa,
+        endereco=endereco, municipio=municipio,
+        data_inicio_vinculo=_parse_data_opcional(data_inicio_vinculo),
+        data_fim_vinculo=_parse_data_opcional(data_fim_vinculo),
+        mes_ano_capacitacao_metodologica=mes_ano_capacitacao,
+        modalidade_capacitacao_metodologica=modalidade_capacitacao_metodologica,
+    )
+    return RedirectResponse(f"/tecnicos/{tecnico}", status_code=303)
+
+
+@app.post("/coordenador/cadastros/supervisor/{supervisor_id}/editar")
+def editar_dados_cadastrais_supervisor(
+    request: Request,
+    supervisor_id: int,
+    rg: str = Form(""),
+    cpf: str = Form(""),
+    contato: str = Form(""),
+    empresa: str = Form(""),
+    cnpj_empresa: str = Form(""),
+    data_inicio_vinculo: str | None = Form(None),
+    data_fim_vinculo: str | None = Form(None),
+):
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    repositorio.atualizar_dados_cadastrais_supervisor(
+        supervisor_id=supervisor_id,
+        rg=rg, cpf=cpf, contato=contato, empresa=empresa, cnpj_empresa=cnpj_empresa,
+        data_inicio_vinculo=_parse_data_opcional(data_inicio_vinculo),
+        data_fim_vinculo=_parse_data_opcional(data_fim_vinculo),
+    )
+    return RedirectResponse("/coordenador/cadastros", status_code=303)
+
+
+@app.post("/coordenador/cadastros/sincronizar")
+def sincronizar_tecnicos_visitas(request: Request, redirecionar_para: str | None = Form(default=None)):
+    """Botão 'Atualizar da base de visitas' — traz técnicos novos/atualiza
+    nome e datas (todo o histórico até hoje, sem precisar escolher período),
+    e já sincroniza as combinações projeto+atividade de cada um."""
+    if not supervisor_logado(request):
+        return RedirectResponse("/login", status_code=303)
+    if request.session.get("tipo") != "coordenador":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao coordenador geral.")
+
+    repositorio.sincronizar_tecnicos_da_visita()
+    repositorio.sincronizar_tecnico_atividades()
+    return RedirectResponse(redirecionar_para or "/coordenador/cadastros", status_code=303)
 
 
 @app.get("/coordenador/ranking")
@@ -920,6 +1518,8 @@ def tela_avaliar(request: Request, tecnico: str, mes: str | None = Query(default
             },
         )
 
+    resumo_visitas = repositorio.resumo_visitas_tecnico(tecnico, mes_ref)
+
     return templates.TemplateResponse(
         "formulario.html",
         {
@@ -929,6 +1529,7 @@ def tela_avaliar(request: Request, tecnico: str, mes: str | None = Query(default
             "mes_referencia": mes_ref.strftime("%m/%Y"),
             "mes_referencia_valor": mes_ref.strftime("%Y-%m"),
             "meses_disponiveis": meses_disponiveis,
+            "resumo_visitas": resumo_visitas,
         },
     )
 

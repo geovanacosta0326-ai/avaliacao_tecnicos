@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Cadastros — Coordenador</title>
+    <link rel="stylesheet" href="/static/style.css?v=4">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Cadastros — Coordenador</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        <nav class="abas">
+            <a href="/coordenador">Início</a>
+            <a href="/coordenador/vinculos-tecnicos">Técnicos</a>
+            <a href="/coordenador/tecnicos-desativados">Desativados/Descredenciados</a>
+            <a href="/coordenador/cadastros" class="aba-ativa">Supervisores</a>
+            <a href="/coordenador/avaliacao">Avaliação</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+
+        <!-- Supervisores -->
+        <h2>Supervisores</h2>
+        {% if erro %}
+        <p class="subtitulo" style="background:var(--terracota-100); color:var(--terracota-600); padding:10px 14px; border-radius:10px; margin-top:0;">
+            {{ erro }}
+        </p>
+        {% endif %}
+        <p class="subtitulo" style="margin-top:0;">
+            <a href="/coordenador/cadastros/associar">Associar técnicos a um supervisor →</a>
+        </p>
+
+        <div style="margin-bottom:16px;">
+            <button type="button" class="botao botao-dourado" onclick="toggleFormNovoSupervisor()">+ Adicionar supervisor</button>
+        </div>
+
+        <div class="cartao-formulario" id="form-novo-supervisor" style="display:none;">
+            <h3>Adicionar novo supervisor</h3>
+            <form method="post" action="/coordenador/cadastros/supervisor/criar">
+                <div class="grade-formulario">
+                    <div class="campo campo-full">
+                        <label for="nome-supervisor">Nome completo</label>
+                        <input type="text" id="nome-supervisor" name="nome" placeholder="Nome completo" required>
+                    </div>
+                </div>
+                <div class="acoes-formulario">
+                    <button type="submit" class="botao botao-dourado">Adicionar supervisor</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="tabela-auditoria-wrap">
+            <table class="tabela-auditoria">
+                <thead>
+                    <tr>
+                        <th style="width:26px;"></th>
+                        <th>Supervisor</th>
+                        <th>Situação</th>
+                        <th>Técnicos</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in supervisores %}
+                    <tr class="linha-principal" onclick="toggleDetalheSupervisor(this)">
+                        <td class="col-seta">▸</td>
+                        <td class="col-tecnico">{{ s.nome }}</td>
+                        <td><span class="status {{ 'avaliado' if s.ativo else 'pendente' }}">{{ 'Ativo' if s.ativo else 'Inativo' }}</span></td>
+                        <td style="color:var(--texto-600); font-size:0.85rem;">
+                            {% set qtd = tecnicos_vinculados_por_supervisor.get(s.id, 0) %}
+                            {{ qtd }} técnico{{ 's' if qtd != 1 else '' }}
+                        </td>
+                        <td>
+                            {% set qtd_vinculados = tecnicos_vinculados_por_supervisor.get(s.id, 0) %}
+                            <label class="toggle-ativo-supervisor" onclick="event.stopPropagation()" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;" title="{{ 'Ativo' if s.ativo else 'Inativo' }}">
+                                <input type="checkbox" {{ 'checked' if s.ativo else '' }}
+                                       onclick="return onToggleAtivoSupervisor(event, {{ s.id }}, '{{ s.nome | replace("'", "\\'") }}', {{ qtd_vinculados }})">
+                                <span style="font-size:0.78rem;">Ativo</span>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr class="linha-detalhe" style="display:none;">
+                        <td></td>
+                        <td colspan="4">
+                            {% if not s.ativo and s.motivo_desativacao %}
+                            <div style="margin-bottom:14px;">
+                                <strong style="font-size:0.82rem; color:var(--terracota-600);">Motivo da desativação:</strong>
+                                <p style="margin:6px 0 0; font-size:0.85rem;">
+                                    {{ s.motivo_desativacao }}
+                                    {% if s.data_desativacao %} — {{ s.data_desativacao.strftime("%d/%m/%Y") }}{% endif %}
+                                </p>
+                            </div>
+                            {% endif %}
+                            {% set vinculos_dele = vinculos_ativos_por_supervisor.get(s.id, []) %}
+                            {% set projetos = projetos_por_supervisor.get(s.id, []) %}
+
+                            <div class="cartao-equipe" style="margin-bottom:16px;">
+                                <h3>Equipe ({{ vinculos_dele | length }})</h3>
+                                {% if vinculos_dele %}
+                                <table class="tabela-equipe">
+                                    <tbody>
+                                        {% for v in vinculos_dele %}
+                                        <tr>
+                                            <td>
+                                                {{ v.tecnico }}
+                                                {% if v.tecnico_ativo == false %}
+                                                <span class="status pendente" style="margin-left:6px;">Desativado</span>
+                                                {% endif %}
+                                            </td>
+                                            <td style="text-align:right; width:1%; white-space:nowrap;">
+                                                <div class="menu-acoes-wrap" onclick="event.stopPropagation();">
+                                                    <button type="button" class="link-acoes" onclick="toggleMenuAcoes(this)">
+                                                        Ações <span class="seta-menu-acoes">▾</span>
+                                                    </button>
+                                                    <div class="menu-acoes-dropdown">
+                                                        {% if v.tecnico_ativo != false %}
+                                                        <button type="button"
+                                                                onclick="fecharMenusAcoes(); abrirDescredenciarTecnico({{ v.vinculo_id }}, '{{ v.tecnico | replace("'", "\\'") }}', '{{ s.nome | replace("'", "\\'") }}')">
+                                                            Descredenciar
+                                                        </button>
+                                                        {% endif %}
+                                                        {% if v.id_tecnico %}
+                                                            {% if v.tecnico_ativo == false %}
+                                                            <button type="submit" form="form-reativar-{{ v.vinculo_id }}">
+                                                                Reativar
+                                                            </button>
+                                                            {% else %}
+                                                            <button type="button" class="item-perigo"
+                                                                    onclick="fecharMenusAcoes(); abrirDesativarTecnico({{ v.id_tecnico }}, '{{ v.tecnico | replace("'", "\\'") }}')">
+                                                                Desativar
+                                                            </button>
+                                                            {% endif %}
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                                {% if v.id_tecnico and v.tecnico_ativo == false %}
+                                                <form method="post" id="form-reativar-{{ v.vinculo_id }}" action="/coordenador/cadastros/tecnico/{{ v.id_tecnico }}/ativo" style="display:none;">
+                                                    <input type="hidden" name="ativo" value="true">
+                                                </form>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                                {% else %}
+                                <p class="subtitulo" style="margin:0; font-size:0.78rem;">Nenhum técnico vinculado ainda.</p>
+                                {% endif %}
+                                {% if projetos %}
+                                <p class="legenda-projetos"><strong>Projetos:</strong> {{ projetos | join(", ") }}</p>
+                                {% endif %}
+                            </div>
+
+                            {% set desativados_dele = historico_desativados_por_supervisor.get(s.id, []) %}
+                            {% if desativados_dele %}
+                            <div class="cartao-equipe" style="margin-bottom:16px;">
+                                <h3 style="cursor:pointer;" onclick="event.stopPropagation(); toggleHistorico(this)">
+                                    Histórico ({{ desativados_dele | length }} desativado{{ 's' if desativados_dele | length != 1 else '' }}) <span class="seta-historico">▸</span>
+                                </h3>
+                                <table class="tabela-equipe" style="display:none;">
+                                    <tbody>
+                                        {% for v in desativados_dele %}
+                                        <tr>
+                                            <td>
+                                                {{ v.tecnico }}
+                                            </td>
+                                            <td style="color:var(--texto-600); font-size:0.76rem;">
+                                                {{ v.motivo_desvinculacao or v.tecnico_motivo_desativacao or "—" }}
+                                            </td>
+                                            <td style="color:var(--texto-600); font-size:0.76rem; white-space:nowrap;">
+                                                {% set data_historico = v.data_desvinculacao or v.tecnico_data_desativacao %}
+                                                {{ data_historico.strftime("%d/%m/%Y") if data_historico else "—" }}
+                                            </td>
+                                            <td style="text-align:right; width:1%; white-space:nowrap;">
+                                                {% if v.id_tecnico %}
+                                                <form method="post" action="/coordenador/cadastros/tecnico/{{ v.id_tecnico }}/ativo" onclick="event.stopPropagation()" style="margin:0;"
+                                                      onsubmit="return confirm('Reativar {{ v.tecnico | replace("'", "\\'") }}? Ele volta a ficar ativo com {{ s.nome | replace("'", "\\'") }}.');">
+                                                    <input type="hidden" name="ativo" value="true">
+                                                    <button type="submit" class="botao" style="margin:0; padding:4px 10px; font-size:0.72rem;">Reativar</button>
+                                                </form>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% endif %}
+
+                            {% set descredenciados_dele = historico_descredenciados_por_supervisor.get(s.id, []) %}
+                            {% if descredenciados_dele %}
+                            <div class="cartao-equipe" style="margin-bottom:16px;">
+                                <h3 style="cursor:pointer;" onclick="event.stopPropagation(); toggleHistorico(this)">
+                                    Histórico ({{ descredenciados_dele | length }} descredenciado{{ 's' if descredenciados_dele | length != 1 else '' }}) <span class="seta-historico">▸</span>
+                                </h3>
+                                <table class="tabela-equipe" style="display:none;">
+                                    <tbody>
+                                        {% for v in descredenciados_dele %}
+                                        <tr>
+                                            <td>{{ v.tecnico }}</td>
+                                            <td style="color:var(--texto-600); font-size:0.76rem;">{{ v.motivo_desvinculacao or "—" }}</td>
+                                            <td style="color:var(--texto-600); font-size:0.76rem; white-space:nowrap;">
+                                                {{ v.data_desvinculacao.strftime("%d/%m/%Y") if v.data_desvinculacao else "—" }}
+                                            </td>
+                                            <td style="text-align:right; width:1%; white-space:nowrap;">
+                                                <form method="post" action="/coordenador/cadastros/tecnico/reverter" onclick="event.stopPropagation()" style="margin:0;"
+                                                      onsubmit="return confirm('Reverter o descredenciamento de {{ v.tecnico | replace("'", "\\'") }}? Ele volta a ficar ativo com {{ s.nome | replace("'", "\\'") }}.');">
+                                                    <input type="hidden" name="vinculo_id" value="{{ v.vinculo_id }}">
+                                                    <button type="submit" class="botao" style="margin:0; padding:4px 10px; font-size:0.72rem;">Reverter</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal: desativar supervisor com motivo -->
+    <dialog id="modal-desativar-supervisor" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" id="form-desativar-supervisor" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Desativar supervisor</h2>
+            <input type="hidden" name="ativo" value="false">
+            <p class="subtitulo" style="margin-bottom: 14px;">Supervisor: <strong id="nome-supervisor-desativar"></strong></p>
+
+            <label>Motivo da desativação</label>
+            <select class="motivo-select-supervisor" required>
+                {% for m in motivos_desativacao_supervisor %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+                <option value="Outro">Outro</option>
+            </select>
+
+            <div class="outro-wrap-supervisor" style="display:none; margin-top: 10px;">
+                <label>Descreva o motivo</label>
+                <textarea class="outro-texto-supervisor" rows="2" placeholder="Descrição obrigatória"></textarea>
+            </div>
+
+            <input type="hidden" name="motivo_desativacao" class="motivo-final-supervisor">
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao">Confirmar desativação</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-desativar-supervisor').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Modal: descredenciar técnico com motivo -->
+    <dialog id="modal-descredenciar-tecnico" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" id="form-descredenciar-tecnico" action="/coordenador/cadastros/tecnico/descredenciar" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Descredenciar técnico</h2>
+            <input type="hidden" name="vinculo_id" class="vinculo-id-descredenciar">
+            <p class="subtitulo" style="margin-bottom: 14px;">Técnico: <strong id="nome-tecnico-descredenciar"></strong></p>
+
+            <input type="hidden" name="motivo_desvinculacao" value="Mudança de supervisor">
+
+            <div class="novo-supervisor-wrap" style="margin-top: 10px;">
+                <label>Novo supervisor</label>
+                <select class="novo-supervisor-select" name="novo_supervisor" required>
+                    <option value="">Selecione…</option>
+                    {% for nome in supervisores_ativos_nomes %}
+                    <option value="{{ nome }}">{{ nome }}</option>
+                    {% endfor %}
+                </select>
+
+                <label>Início do vínculo com o novo supervisor</label>
+                <input type="date" class="novo-vinculo-data-inicio" name="data_inicio_novo" required>
+
+                <label>Fim previsto do vínculo</label>
+                <input type="date" class="novo-vinculo-data-fim" name="data_fim_prevista_novo">
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao">Confirmar descredenciamento</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-descredenciar-tecnico').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Modal: desativar técnico com motivo -->
+    <dialog id="modal-desativar-tecnico" style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
+        <form method="post" id="form-desativar-tecnico" style="padding: 24px 28px; min-width: 320px;">
+            <h2 style="margin-top:0;">Desativar técnico</h2>
+            <input type="hidden" name="ativo" value="false">
+            <p class="subtitulo" style="margin-bottom: 14px;">Técnico: <strong id="nome-tecnico-desativar"></strong></p>
+
+            <label>Motivo da desativação</label>
+            <select class="motivo-select-tecnico-desativar" required>
+                {% for m in motivos_desativacao_tecnico %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+                <option value="Outro">Outro</option>
+            </select>
+
+            <div class="outro-wrap-tecnico-desativar" style="display:none; margin-top: 10px;">
+                <label>Descreva o motivo</label>
+                <textarea class="outro-texto-tecnico-desativar" rows="2" placeholder="Descrição obrigatória"></textarea>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label>Avaliação do Técnico</label>
+                <textarea class="avaliacao-texto-tecnico-desativar" rows="2" placeholder="Descrição obrigatória" required></textarea>
+            </div>
+
+            <input type="hidden" name="motivo_desativacao" class="motivo-final-tecnico-desativar">
+
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button type="submit" class="botao">Confirmar desativação</button>
+                <button type="button" class="botao" onclick="document.getElementById('modal-desativar-tecnico').close()">Cancelar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script>
+        function abrirDesativarTecnico(idTecnico, nomeTecnico) {
+            document.getElementById('form-desativar-tecnico').action =
+                '/coordenador/cadastros/tecnico/' + idTecnico + '/ativo';
+            document.getElementById('nome-tecnico-desativar').textContent = nomeTecnico;
+            document.getElementById('modal-desativar-tecnico').showModal();
+        }
+
+        (function () {
+            const form = document.getElementById('form-desativar-tecnico');
+            const select = form.querySelector('.motivo-select-tecnico-desativar');
+            const outroWrap = form.querySelector('.outro-wrap-tecnico-desativar');
+            const outroTexto = form.querySelector('.outro-texto-tecnico-desativar');
+            const avaliacaoTexto = form.querySelector('.avaliacao-texto-tecnico-desativar');
+            const motivoFinal = form.querySelector('.motivo-final-tecnico-desativar');
+
+            function atualizarVisibilidade() {
+                outroWrap.style.display = select.value === 'Outro' ? 'block' : 'none';
+            }
+
+            select.addEventListener('change', atualizarVisibilidade);
+            atualizarVisibilidade();
+
+            form.addEventListener('submit', function (ev) {
+                if (!avaliacaoTexto.value.trim()) {
+                    ev.preventDefault();
+                    avaliacaoTexto.focus();
+                    return;
+                }
+                let motivo;
+                if (select.value === 'Outro') {
+                    if (!outroTexto.value.trim()) {
+                        ev.preventDefault();
+                        outroTexto.focus();
+                        return;
+                    }
+                    motivo = 'Outro: ' + outroTexto.value.trim();
+                } else {
+                    motivo = select.value;
+                }
+                motivoFinal.value = motivo + ' — Avaliação do Técnico: ' + avaliacaoTexto.value.trim();
+            });
+        })();
+    </script>
+
+
+    <script>
+        function abrirDescredenciarTecnico(vinculoId, nomeTecnico, supervisorAtual) {
+            const form = document.getElementById('form-descredenciar-tecnico');
+            form.querySelector('.vinculo-id-descredenciar').value = vinculoId;
+            document.getElementById('nome-tecnico-descredenciar').textContent = nomeTecnico;
+
+            // Não faz sentido "transferir" pro mesmo supervisor que ele já está.
+            const selectNovo = form.querySelector('.novo-supervisor-select');
+            Array.from(selectNovo.options).forEach(function (opt) {
+                opt.hidden = (opt.value === supervisorAtual);
+            });
+            selectNovo.value = '';
+
+            const dataInicio = form.querySelector('.novo-vinculo-data-inicio');
+            dataInicio.value = new Date().toISOString().slice(0, 10);
+            form.querySelector('.novo-vinculo-data-fim').value = '';
+
+            document.getElementById('modal-descredenciar-tecnico').showModal();
+        }
+    </script>
+
+
+    <script>
+        function onToggleAtivoSupervisor(event, supervisorId, nome, qtdTecnicos) {
+            const checkbox = event.target;
+            if (checkbox.checked) {
+                // Ativando de volta: não precisa de motivo, manda direto.
+                const form = document.createElement('form');
+                form.method = 'post';
+                form.action = '/coordenador/cadastros/supervisor/' + supervisorId + '/ativo';
+                const inputAtivo = document.createElement('input');
+                inputAtivo.type = 'hidden';
+                inputAtivo.name = 'ativo';
+                inputAtivo.value = 'true';
+                form.appendChild(inputAtivo);
+                document.body.appendChild(form);
+                form.submit();
+                return false;
+            }
+
+            // Tentando desativar: só pode se não tiver nenhum técnico vinculado.
+            if (qtdTecnicos > 0) {
+                checkbox.checked = true;
+                alert(nome + ' ainda tem ' + qtdTecnicos + ' técnico(s) vinculado(s). Transfira ou descredencie os técnicos antes de desativar o supervisor.');
+                return false;
+            }
+
+            checkbox.checked = true; // só destrava de fato quando confirmar no modal
+            abrirDesativarSupervisor(supervisorId, nome);
+            return false;
+        }
+
+        function abrirDesativarSupervisor(supervisorId, nome) {
+            document.getElementById('form-desativar-supervisor').action =
+                '/coordenador/cadastros/supervisor/' + supervisorId + '/ativo';
+            document.getElementById('nome-supervisor-desativar').textContent = nome;
+            document.getElementById('modal-desativar-supervisor').showModal();
+        }
+
+        (function () {
+            const form = document.getElementById('form-desativar-supervisor');
+            const select = form.querySelector('.motivo-select-supervisor');
+            const outroWrap = form.querySelector('.outro-wrap-supervisor');
+            const outroTexto = form.querySelector('.outro-texto-supervisor');
+            const motivoFinal = form.querySelector('.motivo-final-supervisor');
+
+            function atualizarVisibilidadeOutro() {
+                outroWrap.style.display = select.value === 'Outro' ? 'block' : 'none';
+            }
+
+            select.addEventListener('change', atualizarVisibilidadeOutro);
+            atualizarVisibilidadeOutro();
+
+            form.addEventListener('submit', function (ev) {
+                if (select.value === 'Outro') {
+                    if (!outroTexto.value.trim()) {
+                        ev.preventDefault();
+                        outroTexto.focus();
+                        return;
+                    }
+                    motivoFinal.value = 'Outro: ' + outroTexto.value.trim();
+                } else {
+                    motivoFinal.value = select.value;
+                }
+            });
+        })();
+
+        function toggleHistorico(titulo) {
+            const tabela = titulo.nextElementSibling;
+            const seta = titulo.querySelector('.seta-historico');
+            const aberto = tabela.style.display !== 'none';
+            tabela.style.display = aberto ? 'none' : 'table';
+            seta.textContent = aberto ? '▸' : '▾';
+        }
+
+        function toggleMenuAcoes(botao) {
+            const wrap = botao.closest('.menu-acoes-wrap');
+            const jaAberto = wrap.classList.contains('aberto');
+            fecharMenusAcoes();
+            if (!jaAberto) wrap.classList.add('aberto');
+        }
+
+        function fecharMenusAcoes() {
+            document.querySelectorAll('.menu-acoes-wrap.aberto').forEach(function (w) {
+                w.classList.remove('aberto');
+            });
+        }
+
+        document.addEventListener('click', fecharMenusAcoes);
+
+        function toggleDetalheSupervisor(linha) {
+            const detalhe = linha.nextElementSibling;
+            const seta = linha.querySelector('.col-seta');
+            const aberto = detalhe.style.display !== 'none';
+            detalhe.style.display = aberto ? 'none' : 'table-row';
+            seta.textContent = aberto ? '▸' : '▾';
+        }
+
+        function toggleFormNovoSupervisor() {
+            const form = document.getElementById('form-novo-supervisor');
+            form.style.display = (form.style.display === 'none') ? 'block' : 'none';
+            if (form.style.display === 'block') {
+                document.getElementById('nome-supervisor').focus();
+            }
+        }
+    </script>
+</body>
+</html>

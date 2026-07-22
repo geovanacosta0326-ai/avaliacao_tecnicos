@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Técnicos desativados e descredenciados</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <style>
+        /* Espaçamento mais compacto só nesta página — não mexe no
+           .lista-tecnicos usado nas outras telas do sistema. */
+        .pagina-desativados .lista-tecnicos li {
+            padding: 8px 14px;
+            margin-bottom: 6px;
+        }
+        .pagina-desativados .lista-tecnicos li small {
+            line-height: 1.3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container pagina-desativados">
+        <div class="top-bar">
+            <h1>Técnicos desativados e descredenciados</h1>
+            <a href="/logout">Sair</a>
+        </div>
+
+        <nav class="abas">
+            <a href="/coordenador">Início</a>
+            <a href="/coordenador/vinculos-tecnicos">Técnicos</a>
+            <a href="/coordenador/tecnicos-desativados" class="aba-ativa">Desativados/Descredenciados</a>
+            <a href="/coordenador/cadastros">Supervisores</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+
+        <div style="display:flex; gap:14px; align-items:center; margin-bottom:20px; max-width:420px;">
+            <input type="text" id="filtro-tecnico-desativados" placeholder="Buscar técnico…" style="flex:1;">
+            <span id="contador-tecnico-desativados" style="color:var(--texto-600); font-size:0.85rem; white-space:nowrap;"></span>
+        </div>
+
+        <h2>Técnicos desativados ({{ desativados|length }})</h2>
+        <p class="subtitulo">Cadastro desativado pelo coordenador, com motivo.</p>
+        {% if not desativados %}
+        <p class="subtitulo">Nenhum técnico desativado no momento.</p>
+        {% else %}
+        <ul class="lista-tecnicos" id="lista-desativados">
+            {% for t in desativados %}
+            <li data-nome="{{ t.nome | lower }}">
+                <a href="/tecnicos/{{ t.nome }}" style="text-decoration:none; color:inherit; flex:1; min-width:0;">
+                    <span>
+                        {{ t.nome }}
+                        <br>
+                        <small style="color: var(--texto-600); font-weight: 400;">
+                            Desativado em {{ t.data_desativacao.strftime("%d/%m/%Y") if t.data_desativacao else "—" }}
+                            · motivo: {{ t.motivo_desativacao or "—" }}
+                        </small>
+                    </span>
+                </a>
+                <span style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+                    <span class="status pendente">Desativado</span>
+                    <form method="post" action="/coordenador/tecnicos-desativados/{{ t.id_tecnico_responsavel }}/reativar" onsubmit="return confirm('Reativar {{ t.nome }}?');" style="margin:0;">
+                        <button type="submit" class="botao">Reativar</button>
+                    </form>
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        <h2 style="margin-top:32px;">Histórico de descredenciamentos ({{ historico_desvinculacoes|length }})</h2>
+        <p class="subtitulo">Todo desvínculo já registrado, mesmo quem depois foi para outro supervisor (transferência).</p>
+        {% if not historico_desvinculacoes %}
+        <p class="subtitulo">Nenhum desvínculo registrado no momento.</p>
+        {% else %}
+        <ul class="lista-tecnicos" id="lista-historico-descredenciamentos">
+            {% for h in historico_desvinculacoes %}
+            <li data-nome="{{ h.tecnico | lower }}">
+                <a href="/tecnicos/{{ h.tecnico }}" style="text-decoration:none; color:inherit; flex:1; min-width:0;">
+                    <span>
+                        {{ h.tecnico }}
+                        <br>
+                        <small style="color: var(--texto-600); font-weight: 400;">
+                            Saiu de {{ h.supervisor_anterior }} em {{ h.data_desvinculacao.strftime("%d/%m/%Y") if h.data_desvinculacao else "—" }}
+                            · motivo: {{ h.motivo_desvinculacao or "—" }}
+                            {% if h.supervisor_atual %}· hoje com {{ h.supervisor_atual }}{% endif %}
+                        </small>
+                    </span>
+                </a>
+                <span style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+                    {% if h.supervisor_atual %}
+                    <span class="status pendente">Transferido</span>
+                    {% else %}
+                    <span class="status pendente">Sem supervisor</span>
+                    {% endif %}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+
+    <script>
+        const inputFiltro = document.getElementById('filtro-tecnico-desativados');
+        const contador = document.getElementById('contador-tecnico-desativados');
+        if (inputFiltro) {
+            const linhas = Array.from(document.querySelectorAll('.pagina-desativados .lista-tecnicos li'));
+
+            function aplicarFiltro() {
+                const busca = inputFiltro.value.trim().toLowerCase();
+                let visiveis = 0;
+                linhas.forEach(function (li) {
+                    const mostra = !busca || li.dataset.nome.includes(busca);
+                    li.style.display = mostra ? '' : 'none';
+                    if (mostra) visiveis++;
+                });
+                contador.textContent = busca ? (visiveis + ' de ' + linhas.length + ' técnico(s)') : '';
+            }
+
+            inputFiltro.addEventListener('input', aplicarFiltro);
+            aplicarFiltro();
+        }
+    </script>
+</body>
+</html>

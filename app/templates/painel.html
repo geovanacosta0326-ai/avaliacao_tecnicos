@@ -36,9 +36,9 @@
                 <div class="card-kpi-sub">{{ avaliados }} de {{ total }} técnicos avaliados</div>
             </div>
             <div class="card-kpi dourado">
-                <div class="card-kpi-label">Soma dos pontos no mês</div>
-                <div class="card-kpi-valor">{{ soma_propria if soma_propria is not none else "—" }}</div>
-                <div class="card-kpi-sub">Soma das avaliações já lançadas</div>
+                <div class="card-kpi-label">Média da avaliação no mês</div>
+                <div class="card-kpi-valor">{{ media_propria if media_propria is not none else "—" }}</div>
+                <div class="card-kpi-sub">Média das avaliações já lançadas</div>
             </div>
             <div class="card-kpi terracota">
                 <div class="card-kpi-label">Pendentes</div>
@@ -87,8 +87,8 @@
             <li>
                 <span>{{ t.tecnico }}</span>
                 <span style="display:flex; align-items:center; gap:10px;">
-                    <a href="/comparar/{{ t.tecnico | urlencode }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">📈 Evolução</a>
                     {% if t.avaliado %}
+                        <a href="/comparar/{{ t.tecnico | urlencode }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">📈 Evolução</a>
                         <a class="status avaliado" href="/minhas-avaliacoes/{{ t.avaliacao_id }}" style="text-decoration:none;">✔ Avaliado · ver detalhe</a>
                     {% else %}
                         <a class="botao" href="/avaliar/{{ t.tecnico }}?mes={{ mes_valor }}" style="margin:0; padding:6px 16px;">Avaliar</a>

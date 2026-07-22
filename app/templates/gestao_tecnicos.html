@@ -14,12 +14,13 @@
 
         <nav class="abas">
             <a href="/" class="aba-ativa">Técnicos da equipe</a>
+            <a href="/tecnicos-desvinculados">Técnicos desvinculados ({{ total_desvinculados }})</a>
             <a href="/avaliacoes">Avaliação dos técnicos</a>
         </nav>
 
         <h2>Equipe atual ({{ vinculados|length }})</h2>
         {% if not vinculados %}
-        <p class="subtitulo">Você ainda não tem nenhum técnico vinculado. Vincule um na lista abaixo.</p>
+        <p class="subtitulo">Você ainda não tem nenhum técnico vinculado. Fale com o coordenador para credenciar um.</p>
         {% else %}
         <ul class="lista-tecnicos">
             {% for v in vinculados %}
@@ -39,108 +40,12 @@
                     </a>
                     <span style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
                         <span class="status avaliado">Ativo</span>
-                        <button type="button" class="botao" style="margin:0; padding:6px 14px; font-size:0.82rem;"
-                                onclick="document.getElementById('modal-desvincular-{{ v.vinculo_id }}').showModal()">
-                            Desvincular
-                        </button>
                     </span>
                 </div>
-
-                <dialog id="modal-desvincular-{{ v.vinculo_id }}" class="modal-desvincular-rapido"
-                        style="border: none; border-radius: 14px; padding: 0; box-shadow: var(--sombra);">
-                    <form method="post" action="/tecnicos/desvincular" style="padding: 24px 28px; min-width: 320px;">
-                        <h2 style="margin-top:0;">Desvincular {{ v.tecnico }}</h2>
-                        <input type="hidden" name="vinculo_id" value="{{ v.vinculo_id }}">
-                        <input type="hidden" name="tecnico" value="{{ v.tecnico }}">
-                        <input type="hidden" name="redirecionar_para" value="/">
-
-                        <label>Data da desvinculação</label>
-                        <input type="date" name="data_desvinculacao" required>
-
-                        <label>Motivo da desvinculação</label>
-                        <select class="motivo-select" required>
-                            {% for m in motivos %}
-                            <option value="{{ m }}">{{ m }}</option>
-                            {% endfor %}
-                            <option value="Outro">Outro</option>
-                        </select>
-
-                        <div class="outro-wrap" style="display:none; margin-top: 10px;">
-                            <label>Descreva o motivo</label>
-                            <textarea class="outro-texto" rows="2" placeholder="Descrição obrigatória"></textarea>
-                        </div>
-
-                        <input type="hidden" name="motivo_desvinculacao" class="motivo-final">
-
-                        <div style="display:flex; gap:10px; margin-top:18px;">
-                            <button type="submit" class="botao">Confirmar desvinculação</button>
-                            <button type="button" class="botao" onclick="document.getElementById('modal-desvincular-{{ v.vinculo_id }}').close()">Cancelar</button>
-                        </div>
-                    </form>
-                </dialog>
             </li>
             {% endfor %}
         </ul>
         {% endif %}
-
-        <h2 style="margin-top: 28px;">Complementar cadastro de técnico</h2>
-        <p class="subtitulo">Técnicos com visita registrada que ainda não têm vínculo ativo com você.</p>
-        <ul class="lista-tecnicos">
-            {% for t in disponiveis %}
-            <li>
-                <a href="/tecnicos/{{ t.tecnico }}" style="text-decoration:none; color:inherit; display:flex; justify-content:space-between; align-items:center; width:100%;">
-                    <span>
-                        {{ t.tecnico }}
-                        <br>
-                        <small style="color: var(--texto-600); font-weight: 400;">
-                            1ª visita: {{ t.primeira_visita.strftime("%d/%m/%Y") if t.primeira_visita else "—" }}
-                            · última visita: {{ t.ultima_visita.strftime("%d/%m/%Y") if t.ultima_visita else "—" }}
-                            · projeto sugerido: {{ t.projeto_consolidado or "—" }}
-                            · atividade sugerida: {{ t.atividade or "—" }}
-                        </small>
-                    </span>
-                    {% if t.supervisor_atual_de_outro %}
-                    <span class="status pendente">Com outro supervisor</span>
-                    {% else %}
-                    <span class="status pendente">Não vinculado</span>
-                    {% endif %}
-                </a>
-            </li>
-            {% endfor %}
-        </ul>
     </div>
-
-    <script>
-        document.querySelectorAll('.modal-desvincular-rapido form').forEach(function (form) {
-            const select = form.querySelector('.motivo-select');
-            const outroWrap = form.querySelector('.outro-wrap');
-            const outroTexto = form.querySelector('.outro-texto');
-            const motivoFinal = form.querySelector('.motivo-final');
-
-            function atualizarVisibilidadeOutro() {
-                outroWrap.style.display = select.value === 'Outro' ? 'block' : 'none';
-            }
-
-            select.addEventListener('change', atualizarVisibilidadeOutro);
-            // Roda uma vez já na carga da página: alguns navegadores restauram a
-            // opção selecionada (ex: depois de voltar/recarregar) sem disparar
-            // o evento "change" — sem isso, o campo ficava com "Outro"
-            // selecionado mas sem mostrar a caixa de descrição.
-            atualizarVisibilidadeOutro();
-
-            form.addEventListener('submit', function (ev) {
-                if (select.value === 'Outro') {
-                    if (!outroTexto.value.trim()) {
-                        ev.preventDefault();
-                        outroTexto.focus();
-                        return;
-                    }
-                    motivoFinal.value = 'Outro: ' + outroTexto.value.trim();
-                } else {
-                    motivoFinal.value = select.value;
-                }
-            });
-        });
-    </script>
 </body>
 </html>

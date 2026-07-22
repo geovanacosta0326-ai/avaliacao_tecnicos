@@ -11,6 +11,32 @@ from sqlalchemy import text
 from app.database import get_engine
 
 
+def rodar_migracoes_unicas():
+    """
+    Garante colunas que algumas telas precisam, mas SEM rodar isso a cada
+    clique — isso deve ser chamado UMA VEZ, no startup do FastAPI
+    (ver app/main.py). Antes, cada leitura/gravação de técnico desativado
+    fazia um ALTER TABLE próprio, e cada ALTER TABLE — mesmo com
+    IF NOT EXISTS, mesmo não mudando nada na prática — precisa de lock
+    exclusivo na tabela inteira. Se qualquer conexão ficasse presa
+    ("idle in transaction"), isso travava toda tela que mexesse em
+    técnico, coordenador incluído. Rodando uma vez só no startup, esse
+    lock só acontece na subida do servidor, nunca durante o uso normal.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE tecnicos ADD COLUMN IF NOT EXISTS motivo_desativacao TEXT;"))
+        conn.execute(text("ALTER TABLE tecnicos ADD COLUMN IF NOT EXISTS data_desativacao DATE;"))
+        # Mês/ano da capacitação metodológica do técnico e a modalidade em
+        # que ela foi realizada (Presencial/Online) — preenchidos pelo
+        # supervisor no cadastro do técnico.
+        conn.execute(text("ALTER TABLE tecnicos ADD COLUMN IF NOT EXISTS mes_ano_capacitacao_metodologica DATE;"))
+        conn.execute(text("ALTER TABLE tecnicos ADD COLUMN IF NOT EXISTS modalidade_capacitacao_metodologica TEXT;"))
+        # nota_final passou a ser a MÉDIA das 10 perguntas (5.0 a 10.0),
+        # não mais a soma (50 a 100) — a coluna precisa aceitar decimais.
+        conn.execute(text("ALTER TABLE avaliacoes_tecnicos ALTER COLUMN nota_final TYPE NUMERIC(4,2);"))
+
+
 def normalizar(texto: str) -> str:
     """
     Normaliza texto para comparação robusta de nomes (técnico, supervisor etc).
@@ -148,6 +174,160 @@ def meses_disponiveis_para_avaliacao(qtd: int = 6) -> list[date]:
         meses.append(m)
         m = mes_anterior(m)
     return meses
+
+
+# ══════════════════════════════════════════════════════════
+# RESUMO DE VISITAS DO TÉCNICO NO MÊS (mostrado ao abrir a tela de
+# avaliação) — total de visitas, visitas válidas/inválidas, orientações
+# (total e concluídas) e propriedades (total/ativas/inativas).
+#
+# IMPORTANTE: o fim do período NUNCA passa de hoje (CURRENT_DATE).
+# Se o mês escolhido (mes_ref) já fechou (caso normal, já que só se
+# avalia mês anterior), fim_mes = último dia do mês mesmo. Mas se um
+# dia esse filtro passar a aceitar o mês corrente (ainda em andamento),
+# fim_mes vira hoje — nunca o dia 30/31 completo, que ainda não
+# aconteceu. Isso evita "buracos" e datas fantasmas no meio do mês.
+# ══════════════════════════════════════════════════════════
+def resumo_visitas_tecnico(tecnico: str, mes_ref: date) -> dict | None:
+    """
+    Resumo agregado das visitas de UM técnico no mes_ref escolhido na
+    tela de avaliação. Mesma régua usada na auditoria/sincronização
+    (flg_coleta_dados = 'Não'), só que recortada para um único técnico
+    e um único mês, em vez de rodar para a base inteira.
+
+    EXCEÇÃO: `ultima_visita` NÃO fica presa ao mes_ref — o banco não
+    amarra a última visita do técnico ao mês em avaliação (ele pode
+    ter visitado depois, ou o mês escolhido pode não ter nenhuma visita
+    ainda assim). Por isso ela é buscada à parte, no histórico completo,
+    igual ao resto do sistema faz (sincronizar_tecnicos_da_visita etc).
+    """
+    import calendar
+    inicio_mes = date(mes_ref.year, mes_ref.month, 1)
+    ultimo_dia_mes = date(
+        mes_ref.year, mes_ref.month,
+        calendar.monthrange(mes_ref.year, mes_ref.month)[1],
+    )
+    fim_mes = min(ultimo_dia_mes, date.today())  # nunca passa do dia de hoje
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        # Última visita real do técnico — histórico completo, sem olhar
+        # para o mês de referência escolhido na tela.
+        ultima_visita_geral = conn.execute(
+            text("""
+                SELECT MAX(dt_visita_v::date) AS ultima_visita
+                FROM public.acompanhamento_mensal_visitas
+                WHERE tecnico_responsavel = :tecnico
+                  AND dt_visita_v::date <= CURRENT_DATE
+                  AND flg_coleta_dados = 'Não';
+            """),
+            {"tecnico": tecnico},
+        ).scalar()
+
+        row = conn.execute(
+            text("""
+                WITH base AS (
+                    SELECT *
+                    FROM public.acompanhamento_mensal_visitas
+                    WHERE tecnico_responsavel = :tecnico
+                      AND dt_visita_v::date BETWEEN :inicio_mes AND :fim_mes
+                      AND flg_coleta_dados = 'Não'
+                ),
+                propriedade_projeto AS (
+                    -- Quantos projetos distintos passaram por cada propriedade
+                    -- deste técnico no período. > 1 = propriedade "repetida"
+                    -- em mais de um projeto (sobreposição).
+                    SELECT id_propriedade, COUNT(DISTINCT projeto) AS qtd_projetos
+                    FROM base
+                    GROUP BY id_propriedade
+                )
+                SELECT
+                    MAX(b.supervisor) AS supervisor,
+                    STRING_AGG(DISTINCT b.projeto, ', ')   AS projetos,
+                    STRING_AGG(DISTINCT b.atividade, ', ') AS atividades,
+
+                    SUM(COALESCE(b.ori_total_geral, 0)) AS ori_total_geral,
+                    SUM(COALESCE(b.ori_concluida, 0))   AS ori_concluida,
+
+                    COUNT(DISTINCT b.id_propriedade) AS total_propriedades,
+                    COUNT(DISTINCT CASE WHEN b.vinculo_dt_fim IS NULL     THEN b.id_propriedade END) AS propriedades_ativas,
+                    COUNT(DISTINCT CASE WHEN b.vinculo_dt_fim IS NOT NULL THEN b.id_propriedade END) AS propriedades_inativas,
+
+                    COUNT(DISTINCT b.id_visita) AS total_visitas,
+                    COUNT(DISTINCT CASE
+                        WHEN b.visita_valida IN ('Valida', 'Validada') THEN b.id_visita
+                    END) AS total_visitas_validas,
+                    COUNT(DISTINCT CASE WHEN b.visita_valida = 'Invalida' THEN b.id_visita END) AS visitas_invalidas,
+
+                    MIN(b.dt_visita_v::date) AS primeira_visita,
+
+                    (SELECT COUNT(*) FROM propriedade_projeto WHERE qtd_projetos > 1) AS propriedades_com_sobreposicao
+                FROM base b
+                GROUP BY b.tecnico_responsavel;
+            """),
+            {"tecnico": tecnico, "inicio_mes": inicio_mes, "fim_mes": fim_mes},
+        ).mappings().fetchone()
+
+    if row is None:
+        # Sem visita registrada NESTE mês específico — mas ainda assim
+        # mostramos a última visita real do técnico (histórico), em vez
+        # de simplesmente esconder essa informação.
+        if ultima_visita_geral is None:
+            return None
+        return {
+            "supervisor": None,
+            "projetos": None,
+            "atividades": None,
+            "ori_total_geral": 0,
+            "ori_concluida": 0,
+            "total_propriedades": 0,
+            "propriedades_ativas": 0,
+            "propriedades_inativas": 0,
+            "total_visitas": 0,
+            "total_visitas_validas": 0,
+            "visitas_invalidas": 0,
+            "primeira_visita": None,
+            "ultima_visita": ultima_visita_geral,
+            "propriedades_com_sobreposicao": 0,
+            "pct_visitas_validas": None,
+            "pct_ori_concluida": None,
+            "pct_propriedades_ativas": None,
+            "pct_propriedades_sem_sobreposicao": None,
+        }
+
+    resultado = dict(row)
+    resultado["ultima_visita"] = ultima_visita_geral  # histórico completo, não o mês filtrado
+
+    total_visitas = resultado.get("total_visitas") or 0
+    total_propriedades = resultado.get("total_propriedades") or 0
+    sobrepostas = resultado.get("propriedades_com_sobreposicao") or 0
+    total_ori = resultado.get("ori_total_geral") or 0
+
+    # % de visitas válidas sobre o total de visitas do período.
+    resultado["pct_visitas_validas"] = (
+        round(resultado.get("total_visitas_validas", 0) / total_visitas * 100, 1)
+        if total_visitas else None
+    )
+    # % de orientações concluídas sobre o total de orientações do período.
+    resultado["pct_ori_concluida"] = (
+        round(resultado.get("ori_concluida", 0) / total_ori * 100, 1)
+        if total_ori else None
+    )
+    # % de propriedades ativas sobre o total de propriedades atendidas.
+    resultado["pct_propriedades_ativas"] = (
+        round(resultado.get("propriedades_ativas", 0) / total_propriedades * 100, 1)
+        if total_propriedades else None
+    )
+    # % de propriedades SEM sobreposição de projeto — ou seja, o inverso
+    # do flag_propriedade_mais_projeto (que só dizia sim/não). Aqui é o
+    # percentual real: quantas propriedades o técnico atende que NÃO
+    # aparecem em mais de um projeto ao mesmo tempo.
+    resultado["pct_propriedades_sem_sobreposicao"] = (
+        round((total_propriedades - sobrepostas) / total_propriedades * 100, 1)
+        if total_propriedades else None
+    )
+
+    return resultado
 
 
 # ══════════════════════════════════════════════════════════
@@ -402,29 +582,23 @@ def recusar_solicitacao(solicitacao_id: int, coordenador: str) -> None:
 
 def tecnicos_do_supervisor_no_mes(supervisor: str, mes_ref: date):
     """
-    Técnicos que este supervisor tinha NAQUELE MÊS específico (mes_ref) —
-    baseado em quem teve visita registrada nesse mês com supervisor_atual
-    igual a este supervisor. Isso é diferente de "quem está vinculado hoje":
-    um técnico que trabalhou com esse supervisor em junho continua entrando
-    na avaliação de junho, mesmo que hoje (em julho, agosto...) ele já
-    tenha sido desvinculado (por qualquer motivo, manual ou automático).
+    Técnicos deste supervisor pra fins de avaliação — baseado APENAS no
+    vínculo ATIVO agora (tabela 'vinculo_tecnico'), sem olhar data alguma.
+    O parâmetro mes_ref é mantido só por compatibilidade com quem chama
+    esta função (o mês em si não interfere mais em quem aparece na lista):
+    é sempre "quem está vinculado a este supervisor neste exato momento".
     """
-    import calendar
-    ultimo_dia = calendar.monthrange(mes_ref.year, mes_ref.month)[1]
-    inicio_mes = date(mes_ref.year, mes_ref.month, 1)
-    fim_mes = date(mes_ref.year, mes_ref.month, ultimo_dia)
-
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
             text("""
-                SELECT DISTINCT tecnico_responsavel AS tecnico
-                FROM acompanhamento_mensal_visitas
-                WHERE supervisor_atual = :supervisor
-                  AND dt_visita BETWEEN :inicio_mes AND :fim_mes
-                ORDER BY tecnico_responsavel;
+                SELECT DISTINCT tecnico
+                FROM vinculo_tecnico
+                WHERE supervisor = :supervisor
+                  AND data_desvinculacao IS NULL
+                ORDER BY tecnico;
             """),
-            {"supervisor": supervisor, "inicio_mes": inicio_mes, "fim_mes": fim_mes},
+            {"supervisor": supervisor},
         ).fetchall()
     return [r.tecnico for r in rows]
 
@@ -435,12 +609,16 @@ def tecnicos_com_status_para_mes(supervisor: str, mes_ref: date):
     NO MÊS ESCOLHIDO (mes_ref) — usado depois que o supervisor seleciona
     o mês/ano na tela inicial e entra na tela dos técnicos.
 
-    IMPORTANTE: os técnicos considerados são os que o supervisor tinha
-    NAQUELE MÊS (pelas visitas), não quem está vinculado a ele hoje — um
-    técnico avaliado em junho continua na lista de junho mesmo que tenha
-    sido desvinculado depois (em julho, agosto...).
+    IMPORTANTE: a lista é a UNIÃO de dois grupos —
+      1) quem teve visita nesse mês com esse supervisor (pelas visitas)
+      2) quem JÁ TEM avaliação lançada nesse mês por esse supervisor,
+         mesmo sem visita dentro do próprio mês (ex: técnico avaliado
+         que não visita há tempos, ou visita registrada com atraso)
+
+    Isso evita que um técnico já avaliado "suma" da lista/ranking só
+    porque a visita dele não caiu certinho dentro do mês.
     """
-    tecnicos = tecnicos_do_supervisor_no_mes(supervisor, mes_ref)
+    tecnicos_do_mes = set(tecnicos_do_supervisor_no_mes(supervisor, mes_ref))
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -453,6 +631,8 @@ def tecnicos_com_status_para_mes(supervisor: str, mes_ref: date):
             {"supervisor": supervisor, "mes_ref": mes_ref},
         ).fetchall()
     avaliacao_id_por_tecnico = {r.tecnico: r.id for r in rows}
+
+    tecnicos = sorted(tecnicos_do_mes | set(avaliacao_id_por_tecnico.keys()))
 
     return [
         {
@@ -610,12 +790,33 @@ def resumo_supervisores_para_mes(mes_ref: date):
     melhor técnico dele nesse mês e a média do supervisor no mês.
     Também marca qual é o melhor supervisor do mês (maior média entre
     os que já têm pelo menos uma avaliação lançada).
+
+    IMPORTANTE: o "total" de técnicos de cada supervisor vem do VÍNCULO
+    MANUAL (tabela vinculo_tecnico) — quem o coordenador realmente
+    associou àquele supervisor na tela de Vínculos/Associar técnicos —
+    e não mais da visita automática (supervisor_atual). O processo aqui
+    é manual: o coordenador escolhe o técnico e vincula ao supervisor;
+    é essa associação que deve mandar na contagem, não quem aparece
+    sozinho na base de visitas (que pode nem ter sido vinculado ainda).
+
+    Considera vínculo ATIVO AGORA (data_desvinculacao IS NULL), igual ao
+    resto do sistema (listar_tecnicos_do_supervisor) — sem exigir que
+    data_inicio seja anterior ao mês avaliado. Isso é de propósito: como
+    os vínculos estão sendo cadastrados manualmente agora (com
+    data_inicio = hoje), exigir "já vinculado até o fim do mês avaliado"
+    zerava o total de todo mundo sempre que o mês em avaliação (ex: 06/2026)
+    fosse anterior à data em que o vínculo foi criado no sistema (hoje,
+    07/2026) — mesmo o vínculo sendo válido.
     """
     engine = get_engine()
 
     with engine.connect() as conn:
         tecnicos_por_supervisor = conn.execute(
-            text(f"SELECT supervisor, tecnico FROM ({QUERY_SUPERVISOR_POR_TECNICO}) base")
+            text("""
+                SELECT DISTINCT supervisor, tecnico
+                FROM vinculo_tecnico
+                WHERE data_desvinculacao IS NULL;
+            """),
         ).fetchall()
 
         avaliados = conn.execute(
@@ -632,10 +833,18 @@ def resumo_supervisores_para_mes(mes_ref: date):
         avaliados_por_supervisor.setdefault(r.supervisor, []).append(r)
 
     resumo = {}
-    for r in tecnicos_por_supervisor:
-        item = resumo.setdefault(r.supervisor, {"supervisor": r.supervisor, "total": 0, "avaliados": 0})
+
+    # União: quem está vinculado manualmente (fonte principal) + quem já
+    # tem avaliação lançada nesse mês mas cujo vínculo não bateu certinho
+    # dentro do período (evita que o técnico "suma" da contagem só por
+    # isso, mesmo cuidado já tomado em tecnicos_com_status_para_mes).
+    pares_vinculo = {(r.supervisor, r.tecnico) for r in tecnicos_por_supervisor}
+    pares_avaliados = {(a.supervisor, a.tecnico) for a in avaliados}
+
+    for supervisor, tecnico in (pares_vinculo | pares_avaliados):
+        item = resumo.setdefault(supervisor, {"supervisor": supervisor, "total": 0, "avaliados": 0})
         item["total"] += 1
-        if any(a.tecnico == r.tecnico for a in avaliados_por_supervisor.get(r.supervisor, [])):
+        if (supervisor, tecnico) in pares_avaliados:
             item["avaliados"] += 1
 
     for supervisor, item in resumo.items():
@@ -845,7 +1054,7 @@ def tecnicos_com_avaliacao_para_mes(supervisor: str, mes_ref: date):
     da avaliação (quando existe) — usado na tela do coordenador para linkar
     direto para o detalhe da avaliação de cada técnico.
     """
-    tecnicos = tecnicos_do_supervisor_no_mes(supervisor, mes_ref)
+    tecnicos_do_mes = set(tecnicos_do_supervisor_no_mes(supervisor, mes_ref))
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -858,6 +1067,8 @@ def tecnicos_com_avaliacao_para_mes(supervisor: str, mes_ref: date):
             {"supervisor": supervisor, "mes_ref": mes_ref},
         ).fetchall()
     avaliacoes_por_tecnico = {r.tecnico: r for r in rows}
+
+    tecnicos = sorted(tecnicos_do_mes | set(avaliacoes_por_tecnico.keys()))
 
     resultado = []
     melhor_media = None
@@ -1064,3 +1275,613 @@ def ranking_objetivo_tecnicos(dt_inicio: date, dt_fim: date) -> list[dict]:
             {"dt_inicio": dt_inicio, "dt_fim": dt_fim},
         ).mappings().fetchall()
     return [dict(r) for r in rows]
+
+
+# ══════════════════════════════════════════════════════════
+# CADASTRO (fundido de repositorio_cadastros.py)
+#
+# Diferente do resto deste arquivo (que lida com avaliação/visitas),
+# esta seção cuida do CADASTRO em si:
+# - Supervisor: inserido manualmente pelo coordenador.
+# - Técnico: sincronizado automaticamente da tabela de visitas (por ID),
+#   com dados cadastrais complementares preenchidos pelo coordenador.
+# ══════════════════════════════════════════════════════════
+
+# Motivos padronizados de desativação de supervisor (mesmo esquema usado
+# no desvínculo de técnico: lista fixa + "Outro" com descrição livre).
+MOTIVOS_DESATIVACAO_SUPERVISOR = [
+    "Saiu da empresa",
+    "Trocou de função",
+    "Encerramento de contrato",
+    "Licença/afastamento",
+]
+
+# Motivos padronizados de desativação de TÉCNICO (cadastro mestre, tabela
+# 'tecnicos') — lista fechada, sem "Outro" com texto livre igual às outras.
+MOTIVOS_DESATIVACAO_TECNICO = [
+    "Fim de Contrato",
+    "Distrato",
+    "Distrato/Descredenciamento",
+]
+
+
+# ══════════════════════════════════════════════════════════
+# SUPERVISORES
+# ══════════════════════════════════════════════════════════
+def sincronizar_supervisores_de_usuarios():
+    """
+    Popula/atualiza a tabela 'supervisores' a partir de quem já tem login
+    em usuarios_supervisores (só os do tipo 'supervisor', não o coordenador).
+    Assim aproveita os nomes já corretos e usados de verdade no sistema,
+    sem precisar reimportar de planilha.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        resultado = conn.execute(
+            text("""
+                INSERT INTO supervisores (nome)
+                SELECT supervisor FROM usuarios_supervisores WHERE tipo = 'supervisor'
+                ON CONFLICT (nome) DO NOTHING
+                RETURNING nome;
+            """)
+        ).fetchall()
+    return [r.nome for r in resultado]
+
+
+def listar_supervisores_cadastrados(apenas_ativos: bool = False):
+    engine = get_engine()
+    query = "SELECT * FROM supervisores"
+    if apenas_ativos:
+        query += " WHERE ativo = TRUE"
+    query += " ORDER BY nome;"
+    with engine.connect() as conn:
+        linhas = conn.execute(text(query)).mappings().all()
+    return [dict(l) for l in linhas]
+
+
+def criar_supervisor(
+    nome: str,
+    rg: str = None,
+    cpf: str = None,
+    contato: str = None,
+    empresa: str = None,
+    cnpj_empresa: str = None,
+    data_inicio_vinculo=None,
+    data_fim_vinculo=None,
+):
+    """Insere um supervisor novo manualmente, já com os dados cadastrais
+    completos (se informados). Só o coordenador pode chamar isso."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO supervisores
+                    (nome, rg, cpf, contato, empresa, cnpj_empresa, data_inicio_vinculo, data_fim_vinculo)
+                VALUES
+                    (:nome, :rg, :cpf, :contato, :empresa, :cnpj_empresa, :data_inicio_vinculo, :data_fim_vinculo)
+                ON CONFLICT (nome) DO NOTHING;
+            """),
+            {
+                "nome": nome.strip(),
+                "rg": rg or None,
+                "cpf": cpf or None,
+                "contato": contato or None,
+                "empresa": empresa or None,
+                "cnpj_empresa": cnpj_empresa or None,
+                "data_inicio_vinculo": data_inicio_vinculo or None,
+                "data_fim_vinculo": data_fim_vinculo or None,
+            },
+        )
+
+
+def definir_ativo_supervisor(supervisor_id: int, ativo: bool, motivo_desativacao: str = None):
+    """
+    Ativa/desativa um supervisor. Só o coordenador pode chamar isso.
+    Ao desativar, grava o motivo e a data (igual ao desvínculo de técnico).
+    Ao reativar, limpa motivo e data — não faz sentido carregar o motivo
+    de uma desativação antiga pra frente.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE supervisores
+                SET ativo = :ativo,
+                    motivo_desativacao = :motivo_desativacao,
+                    data_desativacao = :data_desativacao,
+                    atualizado_em = NOW()
+                WHERE id = :id;
+            """),
+            {
+                "id": supervisor_id,
+                "ativo": ativo,
+                "motivo_desativacao": None if ativo else motivo_desativacao,
+                "data_desativacao": None if ativo else date.today(),
+            },
+        )
+
+
+def obter_supervisor(supervisor_id: int):
+    engine = get_engine()
+    with engine.connect() as conn:
+        linha = conn.execute(
+            text("SELECT * FROM supervisores WHERE id = :id;"), {"id": supervisor_id}
+        ).mappings().first()
+    return dict(linha) if linha else None
+
+
+def atualizar_dados_cadastrais_supervisor(
+    supervisor_id: int,
+    rg: str = None,
+    cpf: str = None,
+    contato: str = None,
+    empresa: str = None,
+    cnpj_empresa: str = None,
+    data_inicio_vinculo=None,
+    data_fim_vinculo=None,
+):
+    """Preenche/atualiza os dados complementares do supervisor (RG, CPF, contato, empresa, CNPJ, vínculo)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE supervisores
+                SET rg = :rg, cpf = :cpf, contato = :contato,
+                    empresa = :empresa, cnpj_empresa = :cnpj_empresa,
+                    data_inicio_vinculo = :data_inicio_vinculo,
+                    data_fim_vinculo = :data_fim_vinculo,
+                    atualizado_em = NOW()
+                WHERE id = :id;
+            """),
+            {
+                "id": supervisor_id,
+                "rg": rg or None,
+                "cpf": cpf or None,
+                "contato": contato or None,
+                "empresa": empresa or None,
+                "cnpj_empresa": cnpj_empresa or None,
+                "data_inicio_vinculo": data_inicio_vinculo or None,
+                "data_fim_vinculo": data_fim_vinculo or None,
+            },
+        )
+
+
+def listar_projetos_do_supervisor(nome_supervisor: str):
+    """
+    Lista os projetos (distintos) dos técnicos atualmente vinculados a
+    esse supervisor — não é um campo digitado, vem automático a partir
+    dos técnicos dele (tecnico_atividades), cruzando por ID.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT DISTINCT ta.projeto
+                FROM vinculo_tecnico v
+                JOIN tecnicos t ON lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
+                JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
+                WHERE v.supervisor = :supervisor
+                  AND v.data_desvinculacao IS NULL
+                  AND ta.projeto IS NOT NULL
+                ORDER BY ta.projeto;
+            """),
+            {"supervisor": nome_supervisor},
+        ).fetchall()
+    return [r.projeto for r in linhas]
+
+
+def contar_tecnicos_vinculados(nome_supervisor: str) -> int:
+    """Quantos técnicos estão HOJE vinculados (ativos) a esse supervisor.
+    Usado pra decidir se dá pra excluir o cadastro dele ou não."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        total = conn.execute(
+            text("""
+                SELECT COUNT(*) FROM vinculo_tecnico
+                WHERE supervisor = :supervisor
+                  AND data_desvinculacao IS NULL;
+            """),
+            {"supervisor": nome_supervisor},
+        ).scalar()
+    return total or 0
+
+
+def excluir_supervisor(supervisor_id: int, nome_supervisor: str):
+    """Exclui o cadastro do supervisor. Se ele ainda tiver técnico(s)
+    vinculado(s), apaga esses vínculos da tabela vinculo_tecnico primeiro
+    (não bloqueia mais a exclusão por causa disso)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM vinculo_tecnico WHERE supervisor = :supervisor;"),
+            {"supervisor": nome_supervisor},
+        )
+        conn.execute(
+            text("DELETE FROM supervisores WHERE id = :id;"),
+            {"id": supervisor_id},
+        )
+
+
+# ══════════════════════════════════════════════════════════
+# TÉCNICOS (cadastro mestre — identidade + dados complementares)
+# ══════════════════════════════════════════════════════════
+def listar_relatorio_completo_tecnicos(supervisor: str | None = None):
+    """
+    Relatório geral: TODO técnico cadastrado (ativo ou não), com os dados
+    cadastrais completos e a situação atual resumida em uma única string,
+    pronta pra exibir/imprimir/exportar:
+      - "Desativado"                    → ativo = FALSE na tabela tecnicos
+      - "Vinculado a {supervisor}"       → ativo = TRUE e tem vínculo aberto
+      - "Descredenciado (sem supervisor)"→ ativo = TRUE, já teve vínculo,
+                                            mas não tem nenhum aberto agora
+      - "Sem vínculo (nunca associado)"  → ativo = TRUE e nunca teve vínculo
+
+    Também separa a "Avaliação do Técnico" do motivo de desativação: o
+    formulário de desativar grava tudo junto numa string só, no formato
+    "{motivo} — Avaliação do Técnico: {texto}" — aqui isso vira dois
+    campos: motivo_desativacao_curto (só o motivo) e avaliacao_desativacao
+    (só o texto da avaliação, quando existir).
+
+    `supervisor`: se informado, só traz técnicos com vínculo ATIVO com
+    esse supervisor (não filtra desativados/descredenciados/sem vínculo,
+    já que esses não têm supervisor atual nenhum).
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT
+                    t.id_tecnico_responsavel, t.nome, t.rg, t.cpf, t.contato,
+                    t.email, t.endereco, t.municipio, t.empresa, t.cnpj_empresa,
+                    t.mes_ano_capacitacao_metodologica, t.modalidade_capacitacao_metodologica,
+                    t.ativo, t.motivo_desativacao, t.data_desativacao,
+                    atual.supervisor AS supervisor_atual,
+                    COALESCE(cad.projeto, atual.projeto) AS projeto_atual,
+                    COALESCE(cad.atividade, atual.atividade) AS atividade_atual,
+                    EXISTS (
+                        SELECT 1 FROM vinculo_tecnico v WHERE v.tecnico = t.nome
+                    ) AS ja_teve_vinculo
+                FROM tecnicos t
+                LEFT JOIN vinculo_tecnico atual
+                    ON atual.tecnico = t.nome AND atual.data_desvinculacao IS NULL
+                LEFT JOIN LATERAL (
+                    SELECT ta.projeto, ta.atividade
+                    FROM tecnico_atividades ta
+                    WHERE ta.id_tecnico_responsavel = t.id_tecnico_responsavel
+                    ORDER BY ta.ultima_visita DESC NULLS LAST
+                    LIMIT 1
+                ) cad ON true
+                ORDER BY t.nome;
+            """)
+        ).mappings().all()
+
+    marcador = " — Avaliação do Técnico: "
+    resultado = []
+    for l in linhas:
+        d = dict(l)
+        if not d["ativo"]:
+            d["situacao"] = "Desativado"
+        elif d["supervisor_atual"]:
+            d["situacao"] = f"Vinculado a {d['supervisor_atual']}"
+        elif d["ja_teve_vinculo"]:
+            d["situacao"] = "Descredenciado (sem supervisor)"
+        else:
+            d["situacao"] = "Sem vínculo (nunca associado)"
+
+        motivo_bruto = d["motivo_desativacao"] or ""
+        if marcador in motivo_bruto:
+            motivo_curto, avaliacao = motivo_bruto.split(marcador, 1)
+        else:
+            motivo_curto, avaliacao = motivo_bruto, ""
+        d["motivo_desativacao_curto"] = motivo_curto or None
+        d["avaliacao_desativacao"] = avaliacao or None
+
+        if supervisor and d["supervisor_atual"] != supervisor:
+            continue
+        resultado.append(d)
+    return resultado
+
+
+def listar_tecnicos_cadastrados(apenas_ativos: bool = False):
+    engine = get_engine()
+    query = "SELECT * FROM tecnicos"
+    if apenas_ativos:
+        query += " WHERE ativo = TRUE"
+    query += " ORDER BY nome;"
+    with engine.connect() as conn:
+        linhas = conn.execute(text(query)).mappings().all()
+    return [dict(l) for l in linhas]
+
+
+def obter_tecnico(id_tecnico_responsavel: int):
+    engine = get_engine()
+    with engine.connect() as conn:
+        linha = conn.execute(
+            text("SELECT * FROM tecnicos WHERE id_tecnico_responsavel = :id;"),
+            {"id": id_tecnico_responsavel},
+        ).mappings().first()
+    return dict(linha) if linha else None
+
+
+def obter_tecnico_por_nome(nome: str):
+    """
+    Busca o cadastro mestre do técnico (tabela 'tecnicos') pelo nome,
+    usando comparação normalizada (ignora acento/maiúscula/espaço extra)
+    pra não falhar por causa de pequenas diferenças de digitação/URL.
+    Retorna o dict com TODAS as colunas (rg, cpf, contato, email, empresa,
+    cnpj_empresa, endereco, municipio, datas de vínculo etc.) ou None se
+    esse técnico ainda não tiver registro nenhum na tabela mestra.
+    """
+    alvo = normalizar(nome)
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(text("SELECT * FROM tecnicos;")).mappings().all()
+    for linha in linhas:
+        if normalizar(linha["nome"]) == alvo:
+            return dict(linha)
+    return None
+
+
+def listar_tecnicos_desativados():
+    """
+    Técnicos com ativo = FALSE na tabela mestra 'tecnicos' — foram
+    desativados pelo coordenador (motivo/data registrados em
+    motivo_desativacao/data_desativacao).
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT * FROM tecnicos
+                WHERE ativo = FALSE
+                ORDER BY data_desativacao DESC NULLS LAST, nome;
+            """)
+        ).mappings().all()
+    return [dict(l) for l in linhas]
+
+
+def listar_tecnicos_descredenciados():
+    """
+    Técnicos ATIVOS na tabela mestra que JÁ TIVERAM vínculo com algum
+    supervisor (existe pelo menos uma linha deles em vinculo_tecnico) mas
+    não têm nenhum vínculo aberto agora — ou seja, foram REALMENTE
+    desvinculados em algum momento. Técnico que nunca teve vínculo
+    nenhum (nunca foi associado a um supervisor) NÃO entra aqui — esse
+    caso é só "ainda não vinculado", não "descredenciado".
+    Traz junto o motivo/data/supervisor do desvínculo mais recente.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT t.*,
+                       (SELECT v.motivo_desvinculacao FROM vinculo_tecnico v
+                        WHERE v.tecnico = t.nome AND v.data_desvinculacao IS NOT NULL
+                        ORDER BY v.data_desvinculacao DESC LIMIT 1) AS motivo_desvinculacao,
+                       (SELECT v.data_desvinculacao FROM vinculo_tecnico v
+                        WHERE v.tecnico = t.nome AND v.data_desvinculacao IS NOT NULL
+                        ORDER BY v.data_desvinculacao DESC LIMIT 1) AS data_desvinculacao,
+                       (SELECT v.supervisor FROM vinculo_tecnico v
+                        WHERE v.tecnico = t.nome AND v.data_desvinculacao IS NOT NULL
+                        ORDER BY v.data_desvinculacao DESC LIMIT 1) AS ultimo_supervisor
+                FROM tecnicos t
+                WHERE t.ativo = TRUE
+                  AND EXISTS (
+                      SELECT 1 FROM vinculo_tecnico v WHERE v.tecnico = t.nome
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM vinculo_tecnico v
+                      WHERE v.tecnico = t.nome AND v.data_desvinculacao IS NULL
+                  )
+                ORDER BY data_desvinculacao DESC NULLS LAST, t.nome;
+            """)
+        ).mappings().all()
+    return [dict(l) for l in linhas]
+
+
+def definir_ativo_tecnico(id_tecnico_responsavel: int, ativo: bool, motivo_desativacao: str = None):
+    """
+    Ativa/desativa um técnico. Só o coordenador pode chamar isso.
+    Ao desativar, grava o motivo e a data de hoje; ao reativar, limpa os dois
+    (igual ao esquema já usado pra supervisor).
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE tecnicos
+                SET ativo = :ativo,
+                    motivo_desativacao = :motivo_desativacao,
+                    data_desativacao = :data_desativacao,
+                    atualizado_em = NOW()
+                WHERE id_tecnico_responsavel = :id;
+            """),
+            {
+                "id": id_tecnico_responsavel,
+                "ativo": ativo,
+                "motivo_desativacao": None if ativo else motivo_desativacao,
+                "data_desativacao": None if ativo else date.today(),
+            },
+        )
+
+
+def atualizar_dados_cadastrais_tecnico(
+    id_tecnico_responsavel: int,
+    rg: str = None,
+    cpf: str = None,
+    contato: str = None,
+    email: str = None,
+    empresa: str = None,
+    cnpj_empresa: str = None,
+    endereco: str = None,
+    municipio: str = None,
+    data_inicio_vinculo=None,
+    data_fim_vinculo=None,
+    mes_ano_capacitacao_metodologica=None,
+    modalidade_capacitacao_metodologica: str = None,
+):
+    """
+    Preenche/atualiza os dados complementares do técnico (RG, CPF, contato,
+    email, empresa, CNPJ, endereço, município, datas de vínculo, mês/ano e
+    modalidade da capacitação metodológica). O nome, primeira/última visita
+    continuam vindo só da sincronização com a tabela de visitas — esses
+    aqui são só os campos "extras" que o supervisor/coordenador digita.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE tecnicos
+                SET rg = :rg, cpf = :cpf, contato = :contato, email = :email,
+                    empresa = :empresa, cnpj_empresa = :cnpj_empresa,
+                    endereco = :endereco, municipio = :municipio,
+                    data_inicio_vinculo = :data_inicio_vinculo,
+                    data_fim_vinculo = :data_fim_vinculo,
+                    mes_ano_capacitacao_metodologica = :mes_ano_capacitacao_metodologica,
+                    modalidade_capacitacao_metodologica = :modalidade_capacitacao_metodologica,
+                    atualizado_em = NOW()
+                WHERE id_tecnico_responsavel = :id;
+            """),
+            {
+                "id": id_tecnico_responsavel,
+                "rg": rg or None,
+                "cpf": cpf or None,
+                "contato": contato or None,
+                "email": email or None,
+                "empresa": empresa or None,
+                "cnpj_empresa": cnpj_empresa or None,
+                "endereco": endereco or None,
+                "municipio": municipio or None,
+                "data_inicio_vinculo": data_inicio_vinculo or None,
+                "data_fim_vinculo": data_fim_vinculo or None,
+                "mes_ano_capacitacao_metodologica": mes_ano_capacitacao_metodologica or None,
+                "modalidade_capacitacao_metodologica": modalidade_capacitacao_metodologica or None,
+            },
+        )
+
+
+def sincronizar_tecnicos_da_visita():
+    """
+    Atualiza (ou cria) os técnicos na tabela mestra a partir de TODO o
+    histórico de visitas até hoje (sem precisar escolher período — pega
+    tudo de uma vez). Segue o mesmo filtro da consulta de auditoria usada
+    pelo coordenador: só considera visita com flg_coleta_dados = 'Não'.
+    Não mexe nos dados cadastrais complementares (CPF, empresa etc.),
+    só nome/primeira/última visita.
+    """
+    engine = get_engine()
+    query = """
+        SELECT
+            id_tecnico_responsavel,
+            tecnico_responsavel,
+            MIN(dt_visita_v::date) AS primeira_visita,
+            MAX(dt_visita_v::date) AS ultima_visita
+        FROM public.acompanhamento_mensal_visitas
+        WHERE dt_visita_v::date <= CURRENT_DATE
+          AND flg_coleta_dados = 'Não'
+          AND id_tecnico_responsavel IS NOT NULL
+        GROUP BY id_tecnico_responsavel, tecnico_responsavel;
+    """
+    with engine.connect() as conn:
+        linhas = conn.execute(text(query)).mappings().all()
+
+    processados = 0
+    with engine.begin() as conn:
+        for l in linhas:
+            conn.execute(
+                text("""
+                    INSERT INTO tecnicos (id_tecnico_responsavel, nome, primeira_visita, ultima_visita)
+                    VALUES (:id, :nome, :primeira, :ultima)
+                    ON CONFLICT (id_tecnico_responsavel) DO UPDATE
+                    SET nome = EXCLUDED.nome,
+                        primeira_visita = LEAST(tecnicos.primeira_visita, EXCLUDED.primeira_visita),
+                        ultima_visita = GREATEST(tecnicos.ultima_visita, EXCLUDED.ultima_visita),
+                        atualizado_em = NOW();
+                """),
+                {
+                    "id": int(l["id_tecnico_responsavel"]),
+                    "nome": (l["tecnico_responsavel"] or "").strip(),
+                    "primeira": l["primeira_visita"],
+                    "ultima": l["ultima_visita"],
+                },
+            )
+            processados += 1
+    return processados
+
+
+def sincronizar_tecnico_atividades():
+    """
+    Atualiza a tabela tecnico_atividades — cada combinação (técnico +
+    projeto + atividade) vira uma linha, com a contagem de propriedades
+    atendidas até hoje (todo o histórico, mesmo filtro de
+    sincronizar_tecnicos_da_visita). Um técnico pode ter várias linhas
+    (uma por atividade). Só sincroniza técnico que já exista na tabela
+    mestra 'tecnicos' (rode sincronizar_tecnicos_da_visita antes, ou junto).
+    """
+    engine = get_engine()
+    query = """
+        SELECT
+            id_tecnico_responsavel,
+            tecnico_responsavel,
+            projeto,
+            atividade,
+            COUNT(DISTINCT id_propriedade) AS propriedades_atendidas,
+            MIN(dt_visita_v::date) AS primeira_visita,
+            MAX(dt_visita_v::date) AS ultima_visita
+        FROM public.acompanhamento_mensal_visitas
+        WHERE dt_visita_v::date <= CURRENT_DATE
+          AND flg_coleta_dados = 'Não'
+          AND id_tecnico_responsavel IS NOT NULL
+        GROUP BY id_tecnico_responsavel, tecnico_responsavel, projeto, atividade;
+    """
+    with engine.connect() as conn:
+        linhas = conn.execute(text(query)).mappings().all()
+
+    processados = 0
+    with engine.begin() as conn:
+        for l in linhas:
+            existe = conn.execute(
+                text("SELECT 1 FROM tecnicos WHERE id_tecnico_responsavel = :id"),
+                {"id": int(l["id_tecnico_responsavel"])},
+            ).fetchone()
+            if not existe:
+                continue
+
+            conn.execute(
+                text("""
+                    INSERT INTO tecnico_atividades
+                        (id_tecnico_responsavel, projeto, atividade, propriedades_atendidas, primeira_visita, ultima_visita)
+                    VALUES
+                        (:id, :projeto, :atividade, :propriedades, :primeira, :ultima)
+                    ON CONFLICT (id_tecnico_responsavel, projeto, atividade) DO UPDATE
+                    SET propriedades_atendidas = EXCLUDED.propriedades_atendidas,
+                        primeira_visita = EXCLUDED.primeira_visita,
+                        ultima_visita = EXCLUDED.ultima_visita,
+                        atualizado_em = NOW();
+                """),
+                {
+                    "id": int(l["id_tecnico_responsavel"]),
+                    "projeto": l["projeto"],
+                    "atividade": l["atividade"],
+                    "propriedades": l["propriedades_atendidas"],
+                    "primeira": l["primeira_visita"],
+                    "ultima": l["ultima_visita"],
+                },
+            )
+            processados += 1
+    return processados
+
+
+def listar_atividades_do_tecnico(id_tecnico_responsavel: int):
+    """Todas as combinações projeto+atividade de um técnico (pode ter mais de uma)."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("""
+                SELECT * FROM tecnico_atividades
+                WHERE id_tecnico_responsavel = :id
+                ORDER BY projeto, atividade;
+            """),
+            {"id": id_tecnico_responsavel},
+        ).mappings().all()
+    return [dict(l) for l in linhas]

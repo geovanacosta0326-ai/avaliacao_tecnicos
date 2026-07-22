@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Associar Técnicos — Coordenador</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>Associar técnicos a um supervisor</h1>
+            <a href="/logout">Sair</a>
+        </div>
+        <nav class="abas">
+            <a href="/coordenador">Início</a>
+            <a href="/coordenador/vinculos-tecnicos">Técnicos</a>
+            <a href="/coordenador/cadastros" class="aba-ativa">Supervisores</a>
+            <a href="/coordenador/avaliacao">Avaliação</a>
+            <a href="/coordenador/ranking">Ranking</a>
+        </nav>
+
+        <p class="subtitulo" style="margin-top:0;">
+            <a href="/coordenador/cadastros">← Voltar para Supervisores</a>
+        </p>
+
+        <form method="post" action="/coordenador/cadastros/sincronizar" style="margin-bottom:20px;">
+            <input type="hidden" name="redirecionar_para" value="/coordenador/cadastros/associar{{ ('?supervisor=' ~ supervisor_escolhido) if supervisor_escolhido else '' }}">
+            <button type="submit" class="botao botao-dourado">Atualizar técnicos da base de visitas</button>
+            <span class="subtitulo" style="margin-left:8px;">Traz técnicos novos direto da base (não vincula ninguém sozinho).</span>
+        </form>
+
+        <form method="get" action="/coordenador/cadastros/associar" style="display:flex; gap:12px; align-items:flex-end; margin-bottom:24px; max-width:420px;">
+            <div style="flex:1;">
+                <label for="select-supervisor">Escolha o supervisor</label>
+                <select id="select-supervisor" name="supervisor" onchange="this.form.submit()">
+                    <option value="">Selecione…</option>
+                    {% for s in supervisores %}
+                    <option value="{{ s.nome }}" {{ 'selected' if s.nome == supervisor_escolhido else '' }}>{{ s.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </form>
+
+        {% if not supervisor_escolhido %}
+        <p class="subtitulo">Escolha um supervisor acima pra ver e marcar os técnicos dele.</p>
+        {% elif not tecnicos %}
+        <p class="subtitulo">Nenhum técnico ativo cadastrado ainda. Cadastre/sincronize técnicos na tela de Supervisores primeiro.</p>
+        {% else %}
+        <p class="subtitulo">
+            Marque os técnicos que devem ficar sob <strong>{{ supervisor_escolhido }}</strong>.
+            Técnicos que já têm vínculo ativo com este ou outro supervisor aparecem travados —
+            desvincule antes, se precisar trocar.
+        </p>
+
+        <form method="post" action="/coordenador/cadastros/associar">
+            <input type="hidden" name="supervisor" value="{{ supervisor_escolhido }}">
+
+            <div style="display:flex; gap:14px; align-items:center; margin-bottom:16px;">
+                <input type="text" id="filtro-tecnico" placeholder="Buscar técnico…" style="flex:1; max-width:320px;">
+                <span id="contador-tecnicos" style="color:var(--texto-600); font-size:0.85rem;"></span>
+            </div>
+
+            <ul class="lista-tecnicos" id="lista-tecnicos-associar">
+                {% for t in tecnicos %}
+                {% set supervisor_atual = supervisor_atual_por_tecnico.get(t.nome | normalizar) %}
+                {% set ja_vinculado = supervisor_atual is not none %}
+                <li data-nome="{{ t.nome | lower }}">
+                    <label style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:12px; cursor:pointer;">
+                        <span style="display:flex; align-items:center; gap:10px;">
+                            <input type="checkbox" name="tecnicos" value="{{ t.id_tecnico_responsavel }}"
+                                   {{ 'checked disabled' if ja_vinculado else '' }}>
+                            <span>
+                                {{ t.nome }}
+                                <br>
+                                <small style="color: var(--texto-600); font-weight: 400;">
+                                    última visita: {{ t.ultima_visita.strftime("%d/%m/%Y") if t.ultima_visita else "—" }}
+                                </small>
+                            </span>
+                        </span>
+                        {% if ja_vinculado %}
+                        <span class="status avaliado">Já vinculado a {{ supervisor_atual }}</span>
+                        {% else %}
+                        <span class="status pendente">Disponível</span>
+                        {% endif %}
+                    </label>
+                </li>
+                {% endfor %}
+            </ul>
+
+            <button type="submit" class="botao botao-dourado" style="margin-top:18px;">Associar selecionados</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <script>
+        const inputFiltro = document.getElementById('filtro-tecnico');
+        const contador = document.getElementById('contador-tecnicos');
+        if (inputFiltro) {
+            const linhas = Array.from(document.querySelectorAll('#lista-tecnicos-associar li'));
+
+            function aplicarFiltro() {
+                const busca = inputFiltro.value.trim().toLowerCase();
+                let visiveis = 0;
+                linhas.forEach(function (li) {
+                    const mostra = !busca || li.dataset.nome.includes(busca);
+                    li.style.display = mostra ? '' : 'none';
+                    if (mostra) visiveis++;
+                });
+                if (contador) contador.textContent = visiveis + ' de ' + linhas.length + ' técnico(s)';
+            }
+
+            inputFiltro.addEventListener('input', aplicarFiltro);
+            aplicarFiltro();
+        }
+    </script>
+</body>
+</html>
