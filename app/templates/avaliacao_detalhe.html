@@ -8,44 +8,47 @@
         .so-imprimir { display: none; }
         /* Só aparece quando a pessoa manda imprimir / salvar em PDF */
         @media print {
+            @page { size: A4; margin: 8mm; }
             .nao-imprimir { display: none !important; }
             .so-imprimir { display: block; }
-            body { background: #fff; font-size: 11px; }
+            body { background: #fff; font-size: 10px; }
             .container { box-shadow: none; max-width: 100%; padding: 0; }
-            .so-imprimir { margin-bottom: 4px; font-size: 1.1rem; }
-            .subtitulo { margin: 0 0 10px; font-size: 0.78rem; }
-            h2 { margin: 8px 0 6px; font-size: 0.95rem; }
+            .so-imprimir { margin-bottom: 2px; font-size: 1rem; }
+            .so-imprimir img { max-width: 150px !important; margin-bottom: 2px !important; }
+            .so-imprimir.texto-orgao { font-size: 0.6rem !important; margin: 0 0 3px !important; }
+            .subtitulo { margin: 0 0 6px; font-size: 0.72rem; }
+            h2 { margin: 5px 0 4px; font-size: 0.85rem; }
 
             .lista-perguntas {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
-                gap: 6px;
-                margin-top: 6px;
+                gap: 4px;
+                margin-top: 4px;
             }
             .lista-perguntas li {
-                padding: 6px 10px;
+                padding: 4px 8px;
                 margin-bottom: 0;
                 break-inside: avoid;
                 page-break-inside: avoid;
             }
-            .lista-perguntas-pergunta { font-size: 0.74rem; line-height: 1.25; }
-            .lista-perguntas-resposta { font-size: 0.8rem; }
+            .lista-perguntas-pergunta { font-size: 0.68rem; line-height: 1.15; }
+            .lista-perguntas-resposta { font-size: 0.74rem; }
 
             /* Cards de indicadores: compactos na impressão, sem gerar página extra */
             .grade-kpi {
                 display: grid;
                 grid-template-columns: repeat(4, 1fr);
-                gap: 6px;
-                margin-bottom: 10px !important;
+                gap: 4px;
+                margin-bottom: 6px !important;
                 page-break-inside: avoid;
             }
             .card-kpi {
-                padding: 6px 8px;
+                padding: 4px 6px;
                 border-radius: 6px;
             }
-            .card-kpi-label { font-size: 0.62rem; }
-            .card-kpi-valor { font-size: 1rem; }
-            .card-kpi-sub { font-size: 0.6rem; margin-top: 2px; }
+            .card-kpi-label { font-size: 0.58rem; }
+            .card-kpi-valor { font-size: 0.9rem; }
+            .card-kpi-sub { font-size: 0.56rem; margin-top: 1px; }
             .barra-progresso { display: none; }
         }
     </style>
@@ -59,6 +62,10 @@
                 <a href="#" onclick="history.back(); return false;">← Voltar</a>
             </span>
         </div>
+        <img class="so-imprimir" src="/static/logo_sistema.png" alt="Sistema FAEC · SENAR Ceará · Sindicato Rural" style="max-width: 220px; width: 100%; height: auto; margin-bottom: 6px;">
+        <p class="so-imprimir texto-orgao" style="font-size:0.7rem; color:var(--texto-600); margin:0 0 8px; font-weight:bold;">
+            SERVIÇO NACIONAL DE APRENDIZAGEM RURAL
+        </p>
         <h1 class="so-imprimir">{{ avaliacao.tecnico }}</h1>
         <p class="subtitulo">
             Avaliado por: <strong>{{ avaliacao.supervisor }}</strong> ·
