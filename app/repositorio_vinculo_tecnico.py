@@ -67,6 +67,21 @@ def listar_todos_tecnicos_com_visitas():
     return [dict(l) for l in linhas]
 
 
+# Projeto/atividade mais recente de cada técnico no cadastro mestre
+# (tecnico_atividades) — pré-calculado UMA VEZ (um técnico, uma linha),
+# em vez de ficar rodando uma sub-consulta correlacionada (LATERAL) por
+# vínculo. É o mesmo técnico que faz a base de visitas ficar rápida,
+# aplicado aqui pro cadastro mestre.
+QUERY_CADASTRO_ATIVIDADES = """
+SELECT DISTINCT ON (t.nome)
+    t.nome AS tecnico,
+    ta.projeto, ta.atividade
+FROM tecnicos t
+JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
+ORDER BY t.nome, ta.ultima_visita DESC NULLS LAST
+"""
+
+
 def listar_vinculos_do_supervisor(supervisor: str):
     """
     TODOS os vínculos deste supervisor — ativos e encerrados — com
@@ -94,14 +109,7 @@ def listar_vinculos_do_supervisor(supervisor: str):
             tm.motivo_desativacao AS tecnico_motivo_desativacao, tm.data_desativacao AS tecnico_data_desativacao
         FROM vinculo_tecnico v
         LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON lower(trim(regexp_replace(vis.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
-        LEFT JOIN LATERAL (
-            SELECT ta.projeto, ta.atividade
-            FROM tecnicos t
-            JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
-            WHERE lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
-            ORDER BY ta.ultima_visita DESC NULLS LAST
-            LIMIT 1
-        ) cad ON true
+        LEFT JOIN ({QUERY_CADASTRO_ATIVIDADES}) cad ON lower(trim(regexp_replace(cad.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
         LEFT JOIN tecnicos tm ON lower(trim(regexp_replace(tm.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
         WHERE v.supervisor = :supervisor
         ORDER BY (v.data_desvinculacao IS NULL) DESC, v.tecnico, v.data_inicio DESC;
@@ -138,14 +146,7 @@ def listar_vinculos_de_todos_os_supervisores():
             tm.motivo_desativacao AS tecnico_motivo_desativacao, tm.data_desativacao AS tecnico_data_desativacao
         FROM vinculo_tecnico v
         LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON lower(trim(regexp_replace(vis.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
-        LEFT JOIN LATERAL (
-            SELECT ta.projeto, ta.atividade
-            FROM tecnicos t
-            JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
-            WHERE lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
-            ORDER BY ta.ultima_visita DESC NULLS LAST
-            LIMIT 1
-        ) cad ON true
+        LEFT JOIN ({QUERY_CADASTRO_ATIVIDADES}) cad ON lower(trim(regexp_replace(cad.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
         LEFT JOIN tecnicos tm ON lower(trim(regexp_replace(tm.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
         ORDER BY v.supervisor, (v.data_desvinculacao IS NULL) DESC, v.tecnico, v.data_inicio DESC;
     """
@@ -338,14 +339,7 @@ def listar_todos_vinculos_ativos():
             vis.primeira_visita, vis.ultima_visita
         FROM vinculo_tecnico v
         LEFT JOIN ({QUERY_TODOS_TECNICOS_COM_VISITAS}) vis ON lower(trim(regexp_replace(vis.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
-        LEFT JOIN LATERAL (
-            SELECT ta.projeto, ta.atividade
-            FROM tecnicos t
-            JOIN tecnico_atividades ta ON ta.id_tecnico_responsavel = t.id_tecnico_responsavel
-            WHERE lower(trim(regexp_replace(t.nome, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
-            ORDER BY ta.ultima_visita DESC NULLS LAST
-            LIMIT 1
-        ) cad ON true
+        LEFT JOIN ({QUERY_CADASTRO_ATIVIDADES}) cad ON lower(trim(regexp_replace(cad.tecnico, '\\s+', ' ', 'g'))) = lower(trim(regexp_replace(v.tecnico, '\\s+', ' ', 'g')))
         WHERE v.data_desvinculacao IS NULL
         ORDER BY v.supervisor, v.tecnico;
     """
