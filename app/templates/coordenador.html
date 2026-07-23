@@ -137,7 +137,7 @@
                     <div class="linha-supervisor-info">
                         <div class="linha-supervisor-nome">{% if s.melhor_supervisor %}🏆 {% endif %}{{ s.supervisor }}</div>
                         <div class="linha-supervisor-meta">
-                            {{ s.total }} técnico(s)
+                            {{ s.total }} técnico(s){% if s.nao_avaliar %} · {{ s.nao_avaliar }} não avaliado(s) com motivo{% endif %}
                             {% if s.melhor_tecnico %}
                                 · melhor técnico: {{ s.melhor_tecnico }}{% if s.melhor_tecnico_media is not none %} ({{ s.melhor_tecnico_media }}){% endif %}
                             {% endif %}
@@ -148,9 +148,9 @@
                             <span class="badge-media">média {{ s.media_supervisor }}</span>
                         {% endif %}
                         {% if s.pendentes == 0 %}
-                            <span class="status avaliado">✔ Completo ({{ s.avaliados }}/{{ s.total }})</span>
+                            <span class="status avaliado">✔ Completo ({{ s.avaliados }}/{{ s.total - s.nao_avaliar }})</span>
                         {% else %}
-                            <span class="status pendente">{{ s.pendentes }} pendente(s) — {{ s.avaliados }}/{{ s.total }}</span>
+                            <span class="status pendente">{{ s.pendentes }} pendente(s) — {{ s.avaliados }}/{{ s.total - s.nao_avaliar }}</span>
                         {% endif %}
                     </div>
                 </a>

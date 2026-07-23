@@ -14,3 +14,5 @@ tabela_supervisores.*
 # Dados pessoais de técnicos (CPF, RG, contato etc.) — não devem ir pro GitHub.
 Cadastro dos Técnicos.xlsx
 backup_avaliacoes_*/
+log.txt
+sistema-avaliacao/

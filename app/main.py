@@ -251,9 +251,13 @@ def painel(request: Request, mes: str | None = Query(default=None)):
     tecnicos = repositorio.tecnicos_com_status_para_mes(supervisor, mes_ref)
     ranking = repositorio.ranking_tecnicos_do_supervisor(supervisor, mes_ref)
 
-    total = len(tecnicos)
-    avaliados = sum(1 for t in tecnicos if t["avaliado"])
+    # Técnicos marcados como "não avaliar este mês" não entram na conta de
+    # pendentes/conclusão — mas continuam aparecendo na lista, com o motivo.
+    avaliaveis = [t for t in tecnicos if not t["nao_avaliar"]]
+    total = len(avaliaveis)
+    avaliados = sum(1 for t in avaliaveis if t["avaliado"])
     pendentes = total - avaliados
+    nao_avaliar_count = len(tecnicos) - total
     pct_conclusao = round(avaliados / total * 100, 1) if total else 0.0
     medias_validas = [r["nota_final"] for r in ranking if r["nota_final"] is not None]
     media_propria = round(sum(medias_validas) / len(medias_validas), 2) if medias_validas else None
@@ -274,6 +278,7 @@ def painel(request: Request, mes: str | None = Query(default=None)):
             "total": total,
             "avaliados": avaliados,
             "pendentes": pendentes,
+            "nao_avaliar_count": nao_avaliar_count,
             "pct_conclusao": pct_conclusao,
             "media_propria": media_propria,
             "data_limite": data_limite.strftime("%d/%m/%Y"),
@@ -281,6 +286,45 @@ def painel(request: Request, mes: str | None = Query(default=None)):
             "autorizado_apos_prazo": autorizado_apos_prazo,
         },
     )
+
+
+# ══════════════════════════════════════════════════════════
+# Marcar / desmarcar um técnico como "não avaliar este mês"
+# ══════════════════════════════════════════════════════════
+@app.post("/avaliacoes/nao-avaliar")
+def marcar_tecnico_nao_avaliar(
+    request: Request,
+    tecnico: str = Form(...),
+    mes: str = Form(...),
+    observacao: str = Form(...),
+):
+    supervisor = supervisor_logado(request)
+    if not supervisor:
+        return RedirectResponse("/login", status_code=303)
+
+    mes_ref = resolver_mes_escolhido(mes)
+    repositorio.marcar_nao_avaliar(
+        supervisor=supervisor, tecnico=tecnico, mes_ref=mes_ref,
+        observacao=observacao.strip(), criado_por=supervisor,
+    )
+    return RedirectResponse(f"/avaliacoes?mes={mes_ref.strftime('%Y-%m')}", status_code=303)
+
+
+@app.post("/avaliacoes/nao-avaliar/remover")
+def remover_marcacao_nao_avaliar(
+    request: Request,
+    tecnico: str = Form(...),
+    mes: str = Form(...),
+):
+    supervisor = supervisor_logado(request)
+    if not supervisor:
+        return RedirectResponse("/login", status_code=303)
+
+    mes_ref = resolver_mes_escolhido(mes)
+    repositorio.desmarcar_nao_avaliar(supervisor=supervisor, tecnico=tecnico, mes_ref=mes_ref)
+    return RedirectResponse(f"/avaliacoes?mes={mes_ref.strftime('%Y-%m')}", status_code=303)
+
+
 
 
 # ══════════════════════════════════════════════════════════

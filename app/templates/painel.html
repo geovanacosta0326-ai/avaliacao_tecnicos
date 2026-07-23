@@ -43,7 +43,7 @@
             <div class="card-kpi terracota">
                 <div class="card-kpi-label">Pendentes</div>
                 <div class="card-kpi-valor">{{ pendentes }}</div>
-                <div class="card-kpi-sub">técnico(s) ainda sem avaliação</div>
+                <div class="card-kpi-sub">técnico(s) ainda sem avaliação{% if nao_avaliar_count %} · {{ nao_avaliar_count }} marcado(s) como "não avaliar"{% endif %}</div>
             </div>
         </div>
 
@@ -84,17 +84,46 @@
         <h2 style="margin-top:28px;">Seus técnicos</h2>
         <ul class="lista-tecnicos">
             {% for t in tecnicos %}
-            <li>
-                <span>{{ t.tecnico }}</span>
+            <li{% if t.nao_avaliar %} style="opacity:0.75;"{% endif %}>
+                <span>
+                    {{ t.tecnico }}
+                    {% if t.nao_avaliar %}
+                    <div style="font-size:0.78rem; color:#8a6d3b; margin-top:2px;">🚫 Não avaliar este mês — {{ t.observacao_nao_avaliar }}</div>
+                    {% endif %}
+                </span>
                 <span style="display:flex; align-items:center; gap:10px;">
-                    {% if t.avaliado %}
+                    {% if t.nao_avaliar %}
+                        <form method="post" action="/avaliacoes/nao-avaliar/remover" style="margin:0;">
+                            <input type="hidden" name="tecnico" value="{{ t.tecnico }}">
+                            <input type="hidden" name="mes" value="{{ mes_valor }}">
+                            <button type="submit" style="background:none; border:1px solid #c9c2b3; border-radius:6px; padding:4px 10px; font-size:0.78rem; cursor:pointer; color:#5c6d63;">Reverter</button>
+                        </form>
+                    {% elif t.avaliado %}
                         <a href="/comparar/{{ t.tecnico | urlencode }}" style="font-size:0.82rem; color:#5c6d63; text-decoration:none; font-weight:600;">📈 Evolução</a>
                         <a class="status avaliado" href="/minhas-avaliacoes/{{ t.avaliacao_id }}" style="text-decoration:none;">✔ Avaliado · ver detalhe</a>
                     {% else %}
                         <a class="botao" href="/avaliar/{{ t.tecnico }}?mes={{ mes_valor }}" style="margin:0; padding:6px 16px;">Avaliar</a>
+                        <button type="button" onclick="document.getElementById('nao-avaliar-{{ loop.index }}').style.display='flex';" style="background:none; border:1px solid #c9c2b3; border-radius:6px; padding:6px 10px; font-size:0.78rem; cursor:pointer; color:#8a6d3b;">Não avaliar</button>
                     {% endif %}
                 </span>
             </li>
+            {% if not t.nao_avaliar and not t.avaliado %}
+            <li id="nao-avaliar-{{ loop.index }}" style="display:none; flex-direction:column; align-items:flex-start; gap:6px; background:#faf6ee; border-radius:8px; margin-top:-6px;">
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button type="button" onclick="document.getElementById('obs-{{ loop.index }}').value='Não iniciou atividade';" style="background:#fff; border:1px solid #d8d2c2; border-radius:14px; padding:3px 10px; font-size:0.76rem; cursor:pointer; color:#5c6d63;">Não iniciou atividade</button>
+                    <button type="button" onclick="document.getElementById('obs-{{ loop.index }}').value='Técnico afastado';" style="background:#fff; border:1px solid #d8d2c2; border-radius:14px; padding:3px 10px; font-size:0.76rem; cursor:pointer; color:#5c6d63;">Técnico afastado</button>
+                    <button type="button" onclick="document.getElementById('obs-{{ loop.index }}').value='Em transição de supervisor';" style="background:#fff; border:1px solid #d8d2c2; border-radius:14px; padding:3px 10px; font-size:0.76rem; cursor:pointer; color:#5c6d63;">Em transição de supervisor</button>
+                    <button type="button" onclick="document.getElementById('obs-{{ loop.index }}').value='Estava sob outra supervisão';" style="background:#fff; border:1px solid #d8d2c2; border-radius:14px; padding:3px 10px; font-size:0.76rem; cursor:pointer; color:#5c6d63;">Estava sob outra supervisão</button>
+                    <button type="button" onclick="document.getElementById('obs-{{ loop.index }}').value='Não tenho condições de avaliar';" style="background:#fff; border:1px solid #d8d2c2; border-radius:14px; padding:3px 10px; font-size:0.76rem; cursor:pointer; color:#5c6d63;">Não tenho condições de avaliar</button>
+                </div>
+                <form method="post" action="/avaliacoes/nao-avaliar" style="display:flex; gap:8px; align-items:flex-start; width:100%;">
+                    <input type="hidden" name="tecnico" value="{{ t.tecnico }}">
+                    <input type="hidden" name="mes" value="{{ mes_valor }}">
+                    <textarea id="obs-{{ loop.index }}" name="observacao" required placeholder="Motivo de não avaliar {{ t.tecnico }} neste mês" rows="2" style="flex:1; font-size:0.85rem; padding:6px 8px; border:1px solid #d8d2c2; border-radius:6px;"></textarea>
+                    <button type="submit" style="background:#8a6d3b; color:#fff; border:none; border-radius:6px; padding:6px 14px; font-size:0.82rem; cursor:pointer;">Confirmar</button>
+                </form>
+            </li>
+            {% endif %}
             {% else %}
             <p>Nenhum técnico vinculado a você foi encontrado na base.</p>
             {% endfor %}
